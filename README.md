@@ -1,5 +1,5 @@
 # pfod_ESP32
-This library provides a support frameword for serving pfodApp and pfodWeb with interactive GUI's from ESP32 devices.
+This library provides a support framework for serving pfodApp and pfodWeb with interactive GUI's from ESP32 devices.
 
 This library includes:-  
 * **ESP32_pfodAppServer**, servers pfodWeb pages  
