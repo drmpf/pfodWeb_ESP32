@@ -1,0 +1,72 @@
+{
+  "name": "LedOnOff",
+  "version": "V1753171123230",
+  "x": 50,
+  "y": 25,
+  "color": 12,
+  "refresh": 4000,
+  "items": [
+    {
+      "type": "rectangle",
+      "indexed": true,
+      "idxName": "idx_1",
+      "idx": 43,
+      "color": 10,
+      "xSize": 18,
+      "ySize": 7,
+      "xOffset": 25,
+      "yOffset": 12,
+      "filled": "true",
+      "centered": "true",
+      "rounded": "true"
+    },
+    {
+      "type": "label",
+      "indexed": true,
+      "idxName": "idx_2",
+      "idx": 44,
+      "color": 9,
+      "xOffset": 25,
+      "yOffset": 12,
+      "text": "Led is On",
+      "fontSize": 0,
+      "bold": "true",
+      "italic": "false",
+      "underline": "false",
+      "align": "center",
+      "decimals": 2
+    },
+    {
+      "type": "touchZone",
+      "xSize": 18,
+      "ySize": 7,
+      "xOffset": 25,
+      "yOffset": 12,
+      "cmdName": "cmd_c1",
+      "cmd": "cmd_c1",
+      "filter": 0,
+      "centered": "true",
+      "priority": 0
+    },
+    {
+      "type": "touchAction",
+      "cmdName": "cmd_c1",
+      "cmd": "cmd_c1",
+      "action": [
+        {
+          "type": "rectangle",
+          "idx": 43,
+          "idxName": "idx_1",
+          "color": 15,
+          "xSize": 17,
+          "ySize": 6,
+          "xOffset": 25,
+          "yOffset": 12,
+          "filled": "true",
+          "centered": "true",
+          "rounded": "true"
+        }
+      ]
+    }
+  ]
+}
