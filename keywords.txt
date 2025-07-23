@@ -1,0 +1,11 @@
+initializeFS  KEYWORD2
+showLittleFS_size  KEYWORD2
+listDir  KEYWORD2
+listDir  KEYWORD2
+listDir  KEYWORD2
+ESP32_start_pfodAppServer  KEYWORD2
+ESP32_handle_pfodAppServer  KEYWORD2
+pfodApp_setVersion  KEYWORD2
+ESP32_start_pfodWebServer  KEYWORD2
+ESP32_handle_pfodWebServer  KEYWORD2
+pfodWeb_setVersion  KEYWORD2
