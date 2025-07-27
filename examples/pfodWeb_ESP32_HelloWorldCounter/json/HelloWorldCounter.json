@@ -1,0 +1,42 @@
+{
+  "js_ver": "V1.0.0",
+  "version": "V1753504568904",
+  "x": 50,
+  "y": 50,
+  "color": 12,
+  "refresh": 5000,
+  "items": [
+    {
+      "type": "label",
+      "color": 9,
+      "xOffset": 25,
+      "yOffset": 25,
+      "text": "Hello World",
+      "fontSize": 8,
+      "bold": "true",
+      "italic": "false",
+      "underline": "false",
+      "align": "center",
+      "decimals": 2
+    },
+    {
+      "type": "label",
+      "indexed": true,
+      "idxName": "idx_1",
+      "idx": 2,
+      "color": 15,
+      "xOffset": 25,
+      "yOffset": 31,
+      "text": "Count: ",
+      "fontSize": 0,
+      "bold": "false",
+      "italic": "false",
+      "underline": "false",
+      "align": "center",
+      "value": 0,
+      "units": " loops",
+      "decimals": 0
+    }
+  ],
+  "name": "HelloWorldCounter"
+}

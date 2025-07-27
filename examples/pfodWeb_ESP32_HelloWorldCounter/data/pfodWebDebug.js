@@ -12,6 +12,9 @@
 // MergeAndRedraw and DrawingManager are available on window object
 
 
+// JavaScript version constant - shared across modules
+const JS_VERSION = "V1.0.1"; // keep in sync with server.js value
+
 // DrawingViewer class to encapsulate all viewer functionality
 class DrawingViewer {
   constructor() {
@@ -28,7 +31,7 @@ class DrawingViewer {
     this.drawingManager = new window.DrawingManager(); // Isolated manager for this viewer
     this.updateTimer = null;
     this.isUpdating = false; // Start with updates disabled until first load completes
-    this.js_ver = "V1.0.0"; // Client JavaScript version
+    this.js_ver = JS_VERSION; // Client JavaScript version
 
     // Request queue system - isolated per viewer
     this.requestQueue = [];
@@ -412,10 +415,13 @@ class DrawingViewer {
     //  identifier: ${identifier}
     //});
     this.currentIdentifier = result.identifier;
-    let drawingName = request.drawingName;
+    let drawingName;
     if (result.drawingName.trim() !== '') {
       drawingName = result.drawingName; // update it
+    } else {
+      drawingName = this.drawingManager.currentDrawingName; // assume we are updating main dwg from menu
     }
+    console.log(`[processMenuResponse] Updated dwgName and currentDrawingName "${drawingName}"`);
     this.drawingManager.currentDrawingName = drawingName;
     // Update page title with drawing name
    // this.updatePageTitle(drawingName);
@@ -502,6 +508,7 @@ class DrawingViewer {
           //this.mergeAndRedraw.redrawCanvas();
    }
     
+   
   // Process the request queue
   async processRequestQueue() {
     // Safety check: ensure requestQueue is initialized
@@ -545,7 +552,9 @@ class DrawingViewer {
  //    this.setProcessingQueue(true); // have non-zero queue length
     // Remove the request from queue and move it to sentRequest
     const request = this.requestQueue.shift();
+    console.warn(`[QUEUE] after setting sentRequest the current queue is:`, JSON.stringify(this.requestQueue, null, 2));
     this.sentRequest = request;
+    console.warn(`[QUEUE] sentRequest is:`, JSON.stringify(this.sentRequest, null, 2));
 
     try {
       console.warn(`[QUEUE] Processing request for "${request.drawingName}" (retry: ${request.retryCount}/${this.MAX_RETRIES})`);
@@ -575,26 +584,43 @@ class DrawingViewer {
       const responseText = await response.text();
       console.log(`[QUEUE] Received raw JSON data for "${request.drawingName}":`);
       console.log(responseText);
-
+     // Clear the sent request and continue processing
+      this.sentRequest = null;
+      //this.requestQueue.shift(); // remove request regardless of what it was this response handles it
+      
+      let lastRequest = request.requestType;
       // Parse the JSON for processing
       const data = JSON.parse(responseText);
+      console.log('[QUEUE] parsedText ', JSON.stringify(data,null,2));
       // Handle different response types for 
-      if (request.requestType === 'mainMenu') {
+      let cmd;
+      if (data.cmd) {
+        cmd = data.cmd;
+        let msgType = cmd[0];
+        if ((msgType.startsWith("{,") || msgType.startsWith("{;"))) {
+          console.log('[QUEUE] Got a menu response ', JSON.stringify(data,null,2));
+          lastRequest = 'mainMenu'  // kluge to handle mainmenu update response to a button press Only from pfodDevice with cmds
+        }
+      } else {
+        console.log('[QUEUE] No cmd field in server response ', JSON.stringify(data));
+      }
+
+
+      if (lastRequest === 'mainMenu') {
         var result = this.processMenuResponse(data, request);
         if (!result) {
           console.error(`[QUEUE] Invalid mainMenu response format. Got: ${cmd}`);
         }
 
-        // Clear the sent request and continue processing
-        this.sentRequest = null;
         // Continue processing immediately - no timeout needed
+    console.warn(`[QUEUE] after process mainMenu the current queue is:`, JSON.stringify(this.requestQueue, null, 2));
         this.processRequestQueue();
         return;
         // else continue to process touch
       }
 
       // Check if server returned empty cmd response for a drawing request
-      if (this.isEmptyCmd(data.cmd) && (request.requestType === 'insertDwg')) {
+      if (this.isEmptyCmd(data.cmd) && (lastRequest === 'insertDwg')) {
         console.warn(`[QUEUE] WARNING: Requested drawing "${request.drawingName}" but server returned empty cmd "{}". Drawing not found on server.`);
       }
 
@@ -611,8 +637,10 @@ class DrawingViewer {
         if (hasNewerDragRequest) {
           console.log(`[QUEUE] Discarding response for DRAG cmd="${cmd}" - newer request exists in queue`);
           // Remove the processed request from the queue first
-          this.sentRequest = null;
-          this.requestQueue.shift();
+//          this.sentRequest = null;
+//          this.requestQueue.shift();
+          console.warn(`[QUEUE] after newerDragRequest the current queue is:`, JSON.stringify(this.requestQueue, null, 2));
+
       //    this.processRequestQueue();
           // Continue processing next request
           setTimeout(() => {
@@ -629,8 +657,10 @@ class DrawingViewer {
         // Mouse is down - queue the response to prevent flashing
         console.log(`[QUEUE] Mouse is down (touchState.isDown=${this.touchState.isDown}) - queuing response for "${request.drawingName}" to prevent flashing`);
         // Remove the processed request from the queue first
-         this.sentRequest = null;
-         this.requestQueue.shift();
+//         this.sentRequest = null;
+//         this.requestQueue.shift();
+         console.warn(`[QUEUE] after isDown sentRequest the current queue is:`, JSON.stringify(this.requestQueue, null, 2));
+
 
         // For DRAG responses, keep only the latest one
         if (request.touchZoneInfo && request.touchZoneInfo.filter === TouchZoneFilters.DRAG) {
@@ -665,6 +695,10 @@ class DrawingViewer {
         } // else continue
         // Insert name property from request since responses no longer include it
         data.name = request.drawingName;
+//         this.sentRequest = null;
+//         this.requestQueue.shift();
+         console.warn(`[QUEUE] after mouse up the current queue is:`, JSON.stringify(this.requestQueue, null, 2));
+
 
         this.processDrawingData(data, null, request.requestType);
         // Clear the sent request since it's been processed
@@ -701,10 +735,14 @@ class DrawingViewer {
       }
 
     } catch (error) {
-      console.error(`[QUEUE] Error processing request for "${request.drawingName}":`, error);
+      let dwgName = " ";
+      if  (request.drawingName !== undefined && request.drawingName !== null) {
+        dwgName = request.drawingName;
+      }
+      console.error(`[QUEUE] Error processing request for "${dwgName}":`, error);
 
       // Additional diagnostics for debugging
-      console.log(`[QUEUE] Debugging state for "${request.drawingName}":`);
+      console.log(`[QUEUE] Debugging state for "${dwgName}":`);
       console.log(`- Main drawing name: ${this.drawingManager.drawings.length > 0 ? this.drawingManager.drawings[0] : ''}`);
       console.log(`- Drawing in drawings array: ${this.drawingManager.drawings.includes(request.drawingName)}`);
       console.log(`- Drawing in drawingsData: ${this.drawingManager.drawingsData[request.drawingName] ? 'yes' : 'no'}`);
@@ -714,7 +752,7 @@ class DrawingViewer {
 
       // Try to fix any missing collections
       if (!this.drawingManager.unindexedItems[request.drawingName] || !this.drawingManager.indexedItems[request.drawingName]) {
-        console.log(`[QUEUE] Attempting to fix missing collections for "${request.drawingName}"`);
+        console.log(`[QUEUE] Attempting to fix missing collections for "${dwgName}"`);
         this.drawingManager.ensureItemCollections(request.drawingName);
       }
 
@@ -756,7 +794,7 @@ class DrawingViewer {
         if (this.requestQueue.length === 0 && !this.sentRequest) {
           console.log(`[QUEUE] Queue empty after failed requests. Drawing with available data.`);
           this.drawingManager.allDrawingsReceived = true; // this is not actually used!!
-          this.setProcessQueue(false);
+          this.setProcessingQueue(false);
           this.redrawCanvas();
 /**          
           // Update the MergeAndRedraw module with the latest state
@@ -1454,5 +1492,6 @@ async function initializeApp() {
 
 // Global touch event handling functions moved to pfodWebMouse.js
 
-// Make DrawingViewer available globally for browser use
+// Make DrawingViewer and JS_VERSION available globally for browser use
 window.DrawingViewer = DrawingViewer;
+window.JS_VERSION = JS_VERSION;

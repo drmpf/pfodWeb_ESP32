@@ -125,6 +125,7 @@ class MergeAndRedraw {
         // We'll rebuild these collections during the redraw
         this.allUnindexedItems = [];
         this.allIndexedItemsByNumber = {}; // Key: numeric index, Value: array of items with that index
+        this.drawingManagerState.allTouchZonesByCmd = {}; // Clear old touchZones from previous drawing
 
         // Mark processed drawings to avoid infinite loops
         let processedDrawings = new Set();

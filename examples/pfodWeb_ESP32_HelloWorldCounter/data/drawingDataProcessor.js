@@ -67,6 +67,26 @@ class DrawingDataProcessor {
               result.name = data.name;
           } else if (msgType.startsWith("{,") || msgType.startsWith("{;")) {
               result = window.translateMenuResponse(cmd);
+              this.currentIdentifier = result.identifier;
+              let drawingName;
+              if (result.drawingName.trim() !== '') {
+               drawingName = result.drawingName; // update it
+             } else {
+               drawingName = this.pfodWeb.drawingManager.currentDrawingName; // assume we are updating main dwg from menu
+             }
+             console.log(`[processDrawingData] Updated dwgName and currentDrawingName "${drawingName}"`);
+
+             this.pfodWeb.drawingManager.currentDrawingName = drawingName;
+            // Update page title with drawing name
+            // this.updatePageTitle(drawingName);
+            // Add the drawing as the first drawing in the array if not already present
+            if (!this.pfodWeb.drawingManager.drawings.includes(drawingName)) {
+               this.pfodWeb.drawingManager.drawings.unshift(drawingName);
+            }
+            // request dwgName and return
+         //   console.log(`[DRAWING_DATA] After tranlation::`, JSON.stringify(result, null, 2));
+         //   this.pfodWebDebug.loadDrawing();
+         //   return;
           }
           console.log(`[DRAWING_DATA] After tranlation::`, JSON.stringify(result, null, 2));
           

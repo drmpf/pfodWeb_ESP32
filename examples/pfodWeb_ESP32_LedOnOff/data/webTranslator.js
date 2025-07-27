@@ -7,6 +7,8 @@
  * provided this copyright is maintained.
  */
 
+// JS_VERSION is available globally via window.JS_VERSION from pfodWebDebug.js
+
 function translateRawRectangle(rawRectString) {
     // Parse rectangle type from prefix
     let rectType = '';
@@ -1091,7 +1093,7 @@ function translateMenuResponse(cmd) {
    }     
    
   // match next cmd item
-      // Extract identifier and drawing name from {,|+identifier~drawingName} or {;|+identifier~drawingName}
+      // Extract identifier and drawing name from {,|+identifier~drawingName} or {;|+identifier~drawingName}  or {;|+identifier}
     const pattern = /^\|\+(.+?)~(.+)$/;
     const patternNoDwg = /^\|\+(.+?)$/;
 
@@ -1115,7 +1117,8 @@ function translateMenuResponse(cmd) {
       drawingName = match[2];
       console.log(`[QUEUE] Extracted identifier: ${identifier}, drawing name: ${drawingName}`);
     } else if (matchNoDwg) {
-      identifier = matchNoDwg[2];
+      identifier = matchNoDwg[1];
+      drawingName = '';
       console.log(`[QUEUE] Extracted identifier: ${identifier}, drawing name: ${drawingName}`);
     }
     const result = {
@@ -1147,7 +1150,7 @@ function translateDwgResponse(cmd) {
     if (matchUpdate) {
         return {
             pfodDrawing: "update",
-            js_ver: "V1.0.0",
+            js_ver: window.JS_VERSION,
             more: matchUpdate[2] === 'm' ? true : false,
             raw_items: []
         };
@@ -1170,7 +1173,7 @@ function translateDwgResponse(cmd) {
 
     return {
         pfodDrawing: "start",
-        js_ver: "V1.0.0",
+        js_ver: window.JS_VERSION,
         version: version || "",
         x: cols ? parseInt(cols, 10) : undefined,
         y: rows ? parseInt(rows, 10) : undefined,
@@ -1187,7 +1190,8 @@ function translateRawItemsToItemArray(rawData) {
 
     const result = {
         pfodDrawing: rawData.pfodDrawing,
-        js_ver: rawData.js_ver,
+        //js_ver: rawData.js_ver,  // rawData does not have js_ver
+        js_ver: window.JS_VERSION,  // use pfodWebDebug.js version
         name: rawData.name,
         version: rawData.version,
         x: rawData.x,

@@ -186,7 +186,6 @@ class Redraw {
         this.ctx.lineWidth = 2; 
         if (this.hasCompletedFirstDraw && !sizeChanged) {
             // Use cached dimensions if they exist and size hasn't changed
-            this.ctx.fillRect(0, 0, this.cachedCanvasWidth, this.cachedCanvasHeight);
             //this.drawRoundedRectangle(0, 0, this.cachedCanvasWidth, this.cachedCanvasHeight, 10, true);
             console.log(`[REDRAW] Using cached dimensions: ${this.cachedCanvasWidth}x${this.cachedCanvasHeight}`);
         } else {
@@ -194,10 +193,10 @@ class Redraw {
             this.cachedCanvasWidth = this.canvas.width;
             this.cachedCanvasHeight = this.canvas.height;
             this.hasCompletedFirstDraw = true;
-            this.ctx.fillRect(0, 0, this.cachedCanvasWidth, this.cachedCanvasHeight);
             //this.drawRoundedRectangle(0, 0, this.cachedCanvasWidth, this.cachedCanvasHeight, 10, true);
             console.log(`[REDRAW] Canvas size changed or first draw - updated cached dimensions to ${this.cachedCanvasWidth}x${this.cachedCanvasHeight}`);
         }
+        this.ctx.fillRect(0, 0, this.cachedCanvasWidth, this.cachedCanvasHeight);
 //        this.ctx.strokeStyle = "#FFFFFF";
 //        this.drawRoundedRectangle(0, 0, this.cachedCanvasWidth, this.cachedCanvasHeight, 20, false);
 //        this.ctx.strokeStyle = "#000000";
@@ -1064,14 +1063,20 @@ class Redraw {
 //            this.ctx.beginPath();
 //            this.ctx.strokeRect(roundedX, roundedY, roundedWidth, roundedHeight);
             
+//            console.log(`[DRAWING_TOUCHZONE] TouchZone item `, JSON.stringify(item,null,2));
+//            console.log(`[DRAWING_TOUCHZONE] TouchZone item.cmdName ${item.cmdName}`);
+//            console.log(`[DRAWING_TOUCHZONE] TouchZone item.cmd ${item.cmd}`);
+
             // Draw command text if present
-            if (item.cmd) {
                 this.ctx.fillStyle = 'rgba(0, 128, 255, 0.7)';
                 this.ctx.font = '16px Arial';
                 this.ctx.textAlign = 'center';
                 this.ctx.textBaseline = 'top'; //'middle';
+            if (item.cmdName !== undefined) {
+                this.ctx.fillText(item.cmdName, roundedX + roundedWidth / 2, roundedY + 5);
+            } else {
                 this.ctx.fillText(item.cmd, roundedX + roundedWidth / 2, roundedY + 5);
-                
+            }  
                 // Draw filter text if present
                 if (item.filter !== undefined) {
                     const filterText = `f:${item.filter}`;
@@ -1082,14 +1087,19 @@ class Redraw {
                 }
                 
                 // Draw idx text if present
-                if (item.idx !== undefined && item.idx > 0) {
-                    const idxText = `i:${item.idx}`;
+                let idxText;
+                if ((item.idx !== undefined) && (item.idx > 0)) {
+                    if (item.idxName !== undefined) {
+                      idxText = `i:${item.idxName}`;
+                    } else {
+                     idxText = `i:${item.idx}`;
+                    }                  
                     this.ctx.font = '10px Arial';
                     this.ctx.textAlign = 'right';
                     this.ctx.textBaseline = 'top';
                     this.ctx.fillText(idxText, roundedX + roundedWidth - 5, roundedY + 5);
                 }
-            }
+           
             
             // Restore original styles
             this.ctx.strokeStyle = originalStroke;

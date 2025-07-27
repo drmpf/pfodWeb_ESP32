@@ -1,6 +1,6 @@
 {
   "name": "LedOnOff",
-  "version": "V1753251866489",
+  "version": "V1753506668570",
   "x": 50,
   "y": 25,
   "color": 12,
@@ -10,7 +10,7 @@
       "type": "rectangle",
       "indexed": true,
       "idxName": "idx_1",
-      "idx": 7,
+      "idx": 1,
       "color": 10,
       "xSize": 18,
       "ySize": 7,
@@ -24,7 +24,7 @@
       "type": "label",
       "indexed": true,
       "idxName": "idx_2",
-      "idx": 8,
+      "idx": 2,
       "color": 9,
       "xOffset": 25,
       "yOffset": 12,
@@ -43,7 +43,7 @@
       "xOffset": 25,
       "yOffset": 12,
       "cmdName": "cmd_c1",
-      "cmd": "cmd_c2",
+      "cmd": "cmd_c1",
       "filter": 0,
       "centered": "true",
       "priority": 0
@@ -51,11 +51,11 @@
     {
       "type": "touchAction",
       "cmdName": "cmd_c1",
-      "cmd": "cmd_c2",
+      "cmd": "cmd_c1",
       "action": [
         {
           "type": "rectangle",
-          "idx": 7,
+          "idx": 1,
           "idxName": "idx_1",
           "color": 8,
           "xSize": 17,
