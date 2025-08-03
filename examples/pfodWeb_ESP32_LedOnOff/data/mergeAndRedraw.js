@@ -30,17 +30,16 @@ class MergeAndRedraw {
             indexedItems: {},
             touchZonesByCmd: {},
             allTouchZonesByCmd: {},
-            drawingResponseStatus: {}
+            drawingResponseStatus: {},
+            // Merged items for reference during drawing/clipping - moved here for consistency
+            allUnindexedItems: [],
+            allIndexedItemsByNumber: {} // Key: numeric index, Value: array of items with that index
         };
         
         // Variables to track canvas size to prevent unnecessary redrawing
         this.cachedCanvasWidth = 0;
         this.cachedCanvasHeight = 0;
         this.hasCompletedFirstDraw = false;
-        
-        // Variables to store merged items for reference during drawing/clipping
-        this.allUnindexedItems = [];
-        this.allIndexedItemsByNumber = {}; // Key: numeric index, Value: array of items with that index
     }
 
     // Helper methods to access drawing manager data
@@ -53,6 +52,10 @@ class MergeAndRedraw {
     }
     getTouchZonesByCmd(drawingName) {
         return this.drawingManagerState.touchZonesByCmd[drawingName] || {};
+    }
+    
+    getTouchActionsByCmd(drawingName) {
+        return this.drawingManagerState.touchActionsByCmd[drawingName] || {};
     }
 
     getDrawingResponseStatus(drawingName) {
@@ -70,6 +73,16 @@ class MergeAndRedraw {
     // Get all touch zones by cmd - this replaces global touchZonesByCmd access
     getAllTouchZonesByCmd() {
         return this.drawingManagerState.allTouchZonesByCmd || {};
+    }
+
+    // Get merged unindexed items for mouse operations
+    getAllUnindexedItems() {
+        return this.drawingManagerState.allUnindexedItems || [];
+    }
+
+    // Get merged indexed items for mouse operations
+    getAllIndexedItemsByNumber() {
+        return this.drawingManagerState.allIndexedItemsByNumber || {};
     }
 
     // Initialize the module
@@ -90,12 +103,15 @@ class MergeAndRedraw {
 
     // Update the state from the drawing manager
     updateState(config) {
+       console.log(`[MERGE_REDRAW] updateState called. Stack trace:`, new Error().stack);
+
         if (config.drawings) this.drawingManagerState.drawings = config.drawings;
         if (config.drawingsData) this.drawingManagerState.drawingsData = config.drawingsData;
         if (config.allDrawingsReceived !== undefined) this.drawingManagerState.allDrawingsReceived = config.allDrawingsReceived; // this is not actually used!!
         if (config.unindexedItems) this.drawingManagerState.unindexedItems = config.unindexedItems;
         if (config.indexedItems) this.drawingManagerState.indexedItems = config.indexedItems;
         if (config.touchZonesByCmd) this.drawingManagerState.touchZonesByCmd = config.touchZonesByCmd;
+        if (config.touchActionsByCmd) this.drawingManagerState.touchActionsByCmd = config.touchActionsByCmd;
         if (config.allTouchZonesByCmd) this.drawingManagerState.allTouchZonesByCmd = config.allTouchZonesByCmd;
         if (config.drawingResponseStatus) this.drawingManagerState.drawingResponseStatus = config.drawingResponseStatus;
         
@@ -104,15 +120,28 @@ class MergeAndRedraw {
     }
 
     // Public interface for canvas redraw
-    redrawCanvas() {
-      // Use atomic function calls for real-time state instead of stale snapshots
-      const isProcessing = this.drawingViewer ? this.drawingViewer.isProcessingQueue() : false;
-      const queueLength = this.drawingViewer ? this.drawingViewer.requestQueue.length : 0;
-      const sentRequest = this.drawingViewer ? this.drawingViewer.sentRequest : null;
+    redrawCanvas(allUnindexedItems,allIndexedItemsByNumber,allTouchZonesByCmd,isTouchAction = false) {
+      // Add stack trace for non-touchAction redraws to identify what's calling them
+   //   if (!isTouchAction) {
+   //     console.log(`[MERGE_REDRAW] Non-touchAction redraw called. Stack trace:`, new Error().stack);
+   //   }
       
-      if (isProcessing || queueLength > 0 || sentRequest) {
-         console.log(`[MERGE_REDRAW] Skipping redraw - processing: ${isProcessing}, queue length: ${queueLength}, sentRequest: ${sentRequest?.drawingName || 'none'}`);
-         return;
+      // Only check processing state if this is NOT a touchAction
+      if (!isTouchAction) {
+        // Use atomic function calls for real-time state instead of stale snapshots
+        const isProcessing = this.drawingViewer ? this.drawingViewer.isProcessingQueue() : false;
+        const queueLength = this.drawingViewer ? this.drawingViewer.requestQueue.length : 0;
+        const sentRequest = this.drawingViewer ? this.drawingViewer.sentRequest : null;
+        
+        // Check if mouse is down - prevent full redraws during drag operations
+        // Access mouse state through the drawingViewer which has direct access
+        const isMouseDown = this.drawingViewer && this.drawingViewer.touchState && this.drawingViewer.touchState.isDown;
+        console.log(`[MERGE_REDRAW] DEBUG Redraw check - processing: ${isProcessing}, queue: ${queueLength}, sentRequest: ${sentRequest?.drawingName || 'none'}, mouseDown: ${isMouseDown}, drawingViewer exists: ${!!this.drawingViewer}, touchState exists: ${!!(this.drawingViewer && this.drawingViewer.touchState)}`);
+        
+        if (isProcessing || queueLength > 0 || sentRequest || isMouseDown) {
+          console.log(`[MERGE_REDRAW] Skipping redraw - processing: ${isProcessing}, queue length: ${queueLength}, sentRequest: ${sentRequest?.drawingName || 'none'}, mouseDown: ${isMouseDown}`);
+           return;
+        }
       }
         // Use DrawingManager state to get the current drawing data
         const mainDrawingName = this.drawingManagerState.drawings.length > 0 ? this.drawingManagerState.drawings[0] : '';
@@ -121,16 +150,26 @@ class MergeAndRedraw {
         if (!currentDrawingData) return;
         
         console.log(`[MERGE_REDRAW] Starting redraw for canvas: ${mainDrawingName}, size=${this.canvas.width}x${this.canvas.height} at ${new Date().toISOString()}`);
+        
+        // For touchAction redraws, skip merge and use existing state
+        if (isTouchAction) {
+          console.log(`[MERGE_REDRAW] TouchAction redraw - using existing state, skipping merge operation`);
+          console.log(`[TOUCHACTION_REDRAW_DEBUG] TouchAction redraw inputs - unindexed: ${allUnindexedItems.length}, indexed keys: [${Object.keys(allIndexedItemsByNumber).join(', ')}], touchZones: [${Object.keys(allTouchZonesByCmd).join(', ')}]`);
+          console.log(`[TOUCHACTION_REDRAW_DEBUG] currentDrawingData.name: ${currentDrawingData?.name}`);
+          return this.redraw.redrawCanvas(currentDrawingData, allUnindexedItems, allIndexedItemsByNumber, allTouchZonesByCmd);
+        }
                 
-        // We'll rebuild these collections during the redraw
-        this.allUnindexedItems = [];
-        this.allIndexedItemsByNumber = {}; // Key: numeric index, Value: array of items with that index
-        this.drawingManagerState.allTouchZonesByCmd = {}; // Clear old touchZones from previous drawing
+        // We'll rebuild these collections during the redraw (only for normal redraws)
+        this.drawingManagerState.allUnindexedItems = [];
+        this.drawingManagerState.allIndexedItemsByNumber = {}; // Key: numeric index, Value: array of items with that index
 
         // Mark processed drawings to avoid infinite loops
         let processedDrawings = new Set();
 
         console.log(`[MERGE_REDRAW] Starting to merge drawing items with unindexed and indexed items from DrawingManager`);
+        
+        // Clear old touchZones from previous drawing - moved here before merge operation
+        this.drawingManagerState.allTouchZonesByCmd = {};
         
         // Set up initial transform state for the main drawing
         const initialTransform = {
@@ -161,36 +200,71 @@ class MergeAndRedraw {
                 drawingName: mainDrawingName,
                 transform: { x: 0, y: 0, scale: 1.0 }
             };
-        this.mergeDrawingItems(mainDwg, this.allUnindexedItems, this.allIndexedItemsByNumber, processedDrawings, mainClipRegion);
+        this.mergeDrawingItems(mainDwg, this.drawingManagerState.allUnindexedItems, this.drawingManagerState.allIndexedItemsByNumber,this.drawingManagerState.allTouchZonesByCmd, processedDrawings, mainClipRegion);
+        
+        // Update the main drawing's backup arrays with merged items (with correct transforms)
+        // This ensures touchActions can find items with the correct transforms for pseudo items
+        if (mainDrawingName) {
+            // Update main drawing's indexed items with merged versions (correct transforms)
+            if (!this.drawingManagerState.indexedItems[mainDrawingName]) {
+                this.drawingManagerState.indexedItems[mainDrawingName] = {};
+            }
+            for (const idx in this.drawingManagerState.allIndexedItemsByNumber) {
+                const mergedItem = this.drawingManagerState.allIndexedItemsByNumber[idx];
+                this.drawingManagerState.indexedItems[mainDrawingName][idx] = {...mergedItem};
+                console.log(`[MERGE_REDRAW] Updated main drawing indexed item idx=${idx} with merged transform for touchAction backup`);
+            }
+            
+            // Update main drawing's touchZones with merged versions (correct transforms)  
+            if (!this.drawingManagerState.touchZonesByCmd[mainDrawingName]) {
+                this.drawingManagerState.touchZonesByCmd[mainDrawingName] = {};
+            }
+            for (const cmd in this.drawingManagerState.allTouchZonesByCmd) {
+                const mergedTouchZone = this.drawingManagerState.allTouchZonesByCmd[cmd];
+                this.drawingManagerState.touchZonesByCmd[mainDrawingName][cmd] = {...mergedTouchZone};
+                console.log(`[MERGE_REDRAW] Updated main drawing touchZone cmd="${cmd}" with merged transform for touchAction backup`);
+            }
+        }
         
         // Report the merged results
-        console.log(`[MERGE_REDRAW] After merging all drawings: ${this.allUnindexedItems.length} unindexed items, ${Object.keys(this.allIndexedItemsByNumber).length} different indices, ${Object.keys(this.drawingManagerState.allTouchZonesByCmd).length} touchZones`)
-        for (let i = 0; i < this.allUnindexedItems.length; i++) {
-            const item = this.allUnindexedItems[i];
-            console.log(`[REDRAW] DEBUG: Unindexed item ${i}: type=${item.type}, drawingName=${item.drawingName || 'none'}, transform=(${item.transform?.x},${item.transform?.y}), scale=${item.transform?.scale}`);
+        console.log(`[MERGE_REDRAW] After merging all drawings: ${this.drawingManagerState.allUnindexedItems.length} unindexed items, ${Object.keys(this.drawingManagerState.allIndexedItemsByNumber).length} different indices, ${Object.keys(this.drawingManagerState.allTouchZonesByCmd).length} touchZones`)
+        for (let i = 0; i < this.drawingManagerState.allUnindexedItems.length; i++) {
+            const item = this.drawingManagerState.allUnindexedItems[i];
+            console.log(`[MERGE_REDRAW] DEBUG: Unindexed item ${i}: type=${item.type}, drawingName=${item.drawingName || 'none'}, transform=(${item.transform?.x},${item.transform?.y}), scale=${item.transform?.scale}`);
+            console.log(`[MERGE_REDRAW] DEBUG: Unindexed item ${i}: `,JSON.stringify(item,null,2));
         }
         
         // Only add items to draw if specifically needed for debugging
         // We don't add test rectangles for empty drawings, as they should be allowed to be empty
-        if (this.allUnindexedItems.length === 0) {
-            console.log(`[MERGE_REDRAW] No items to draw. Canvas will remain empty.`);
-            // The test rectangle code has been removed intentionally to allow for empty canvases
-        }
+  //      if (this.drawingManagerState.allUnindexedItems.length === 0) {
+  //          console.log(`[MERGE_REDRAW] No items to draw. Canvas will remain empty.`);
+  //          // The test rectangle code has been removed intentionally to allow for empty canvases
+  //      }
         
         // Debug: print allIndexedItems ordered by index
-        const sortedIndexes = Object.keys(this.allIndexedItemsByNumber).map(Number).sort((a, b) => a - b);
+        const sortedIndexes = Object.keys(this.drawingManagerState.allIndexedItemsByNumber).map(Number).sort((a, b) => a - b);
         if (sortedIndexes.length > 0) {
             console.log(`[MERGE_REDRAW] allIndexedItems ordered by index:`);
             sortedIndexes.forEach(index => {
-                const item = this.allIndexedItemsByNumber[index];
+                const item = this.drawingManagerState.allIndexedItemsByNumber[index];
                 console.log(`  Index ${index}: Type: ${item.type || 'unknown'}, Drawing: ${item.drawingName || 'unknown'}`);
+               console.log(`[MERGE_REDRAW] DEBUG: Indexed item: `,JSON.stringify(item,null,2));
             });
         } else {
             console.log(`[MERGE_REDRAW] No indexed items found.`);
         }
        
+        if (Object.keys(this.drawingManagerState.allTouchZonesByCmd).length > 0) {
+          for (const cmd in this.drawingManagerState.allTouchZonesByCmd) {
+            const touchZone = this.drawingManagerState.allTouchZonesByCmd[cmd];
+            console.log(`[MERGE_REDRAW] DEBUG: touchZone item: `,JSON.stringify(touchZone,null,2));
+          }
+        } else {
+           console.log(`[MERGE_REDRAW] No touchZone items found.`);
+        }
+
         // Now call redraw to handle the actual drawing
-        return this.redraw.redrawCanvas(currentDrawingData, this.allUnindexedItems, this.allIndexedItemsByNumber);
+        return this.redraw.redrawCanvas(currentDrawingData, this.drawingManagerState.allUnindexedItems, this.drawingManagerState.allIndexedItemsByNumber, this.drawingManagerState.allTouchZonesByCmd);
     }
 
     // Calculate clipping region for an item
@@ -265,12 +339,13 @@ class MergeAndRedraw {
     **/
     // Merge drawing items from a specific drawing with transforms and clipping
     // dwgTransform is the parent transform and scaling for this deg
-    mergeDrawingItems(insertDwg, allUnindexedItems, allIndexedItemsByNumber, processedDrawings, parentClipRegion = null) {
+    mergeDrawingItems(insertDwg, allUnindexedItems, allIndexedItemsByNumber, allTouchZonesByCmd, processedDrawings, parentClipRegion = null) {
        // console.log(`[MERGE_DWG] Using parent transform: (${parentTransform.x}, ${parentTransform.y}, ${parentTransform.scale}) for drawing "${drawingName}"`);
         // parent transform is base offset + scale
         // all added item first have their offset scaled by scale and then base offset added
         
         let drawingName = insertDwg.drawingName;
+        console.warn(`[MERGE_DWG] Merging Drawing "${drawingName}".`);
         console.log(`[MERGE_DWG] Beginning merge process for drawing "${drawingName}" ${JSON.stringify(insertDwg)}`);        
         // Get drawing data for dimensions and color
         const drawingData = this.drawingManagerState.drawingsData[drawingName];
@@ -304,13 +379,14 @@ class MergeAndRedraw {
         const drawingUnindexedItems = this.getUnindexedItems(drawingName);
         const drawingIndexedItems = this.getIndexedItems(drawingName);
         const touchZoneItems = this.getTouchZonesByCmd(drawingName);
+        const touchActionItems = this.getTouchActionsByCmd(drawingName);
         
         console.log(`[MERGE_DWG] Processing ${drawingUnindexedItems.length} unindexed items, ${Object.keys(drawingIndexedItems).length} indexed items, ${Object.keys(touchZoneItems).length} touchZones from "${drawingName}"`);
         
         // Handle case where drawing has no items
         if (drawingUnindexedItems.length === 0 && Object.keys(drawingIndexedItems).length === 0) {
             console.log(`[MERGE_DWG] Drawing "${drawingName}" has no items, but will still be drawn as a rectangle with background color.`);
-            if (Object.keys(drawingIndexedItems).length !== 0) {
+            if (Object.keys(touchZoneItems).length !== 0) {
                 console.log(`[MERGE_DWG] Drawing "${drawingName}" has touchZones which will be drawn in debug mode.`);
             }    
         }
@@ -344,8 +420,8 @@ class MergeAndRedraw {
             processedItem.clipRegion = dwgClipRegion;
             // build combined transform
            const itemTransform = {...processedItem.transform};
-           itemTransform.x += itemTransform.x * dwgTransform.scale + dwgTransform.x;
-           itemTransform.y += itemTransform.y * dwgTransform.scale + dwgTransform.y;
+           itemTransform.x = itemTransform.x * dwgTransform.scale + dwgTransform.x;
+           itemTransform.y = itemTransform.y * dwgTransform.scale + dwgTransform.y;
            itemTransform.scale = itemTransform.scale *  dwgTransform.scale;
            processedItem.transform = itemTransform;
            // Handle touchZone
@@ -354,9 +430,9 @@ class MergeAndRedraw {
            if (touchZoneCmd.trim().length == 0) {
              console.warn(`[MERGE_DWG] Error empty touchzone cmd in drawing "${drawingName}" ${JSON.stringify(processedItem)}`);
            } else {
-             if (!this.drawingManagerState.allTouchZonesByCmd[touchZoneCmd]) {
+             if (!allTouchZonesByCmd[touchZoneCmd]) {
              } else {
-                const currentItem = this.drawingManagerState.allTouchZonesByCmd[touchZoneCmd];
+                const currentItem = allTouchZonesByCmd[touchZoneCmd];
                 if (currentItem.parentDrawingName !== processedItem.parentDrawingName) {
                     console.warn(`[MERGE_DWG] Error: Updating existing touchZone with cmd ${touchZoneCmd} in "${processedItem.parentDrawingName}" with item from different drawing, "${currentItem.parentDrawingName}"`);
                 }
@@ -365,10 +441,33 @@ class MergeAndRedraw {
                 processedItem.clipRegion = {...currentItem.clipRegion};
                 console.log(`[MERGE_DWG_UPDATE] Update existing touchZone with cmd ${touchZoneCmd} to ${JSON.stringify(processedItem)}`);
             }
-            console.log(`[MERGE_DWG] Added touchZone to allTouchZonesByCmd  ${JSON.stringify(processedItem)}`);
-            this.drawingManagerState.allTouchZonesByCmd[touchZoneCmd] = processedItem;
+            console.warn(`[MERGE_DWG] Added touchZone to allTouchZonesByCmd  ${JSON.stringify(processedItem)}`);
+            allTouchZonesByCmd[touchZoneCmd] = processedItem;
            }
         }
+        
+        // Process touchActions - merge them into the main drawing's touchActions
+        for (const cmd in touchActionItems) {
+            const touchActions = touchActionItems[cmd];
+            if (touchActions && touchActions.length > 0) {
+                console.log(`[MERGE_DWG] Found ${touchActions.length} touchActions for cmd="${cmd}" in drawing "${drawingName}"`);
+                
+                // We need to add these touchActions to the main drawing's touchActionsByCmd
+                // The merge process should make nested drawing touchActions available to the main drawing
+                const mainDrawingName = insertDwg.parentDrawingName;
+                if (!this.drawingManagerState.touchActionsByCmd[mainDrawingName]) {
+                    this.drawingManagerState.touchActionsByCmd[mainDrawingName] = {};
+                }
+                if (!this.drawingManagerState.touchActionsByCmd[mainDrawingName][cmd]) {
+                    this.drawingManagerState.touchActionsByCmd[mainDrawingName][cmd] = [];
+                }
+                
+                // Copy touchActions from nested drawing to main drawing
+                this.drawingManagerState.touchActionsByCmd[mainDrawingName][cmd] = [...touchActions];
+                console.log(`[MERGE_DWG] Merged ${touchActions.length} touchActions for cmd="${cmd}" from "${drawingName}" into main drawing "${mainDrawingName}"`);
+            }
+        }
+        
         
         // Process unindexed items
         for (let i = 0; i < drawingUnindexedItems.length; i++) {
@@ -377,10 +476,10 @@ class MergeAndRedraw {
             item.clipRegion = dwgClipRegion;
             
             console.log(`[MERGE_DWG] Processing unindexed item ${i} of type '${item.type}' in drawing "${drawingName}"`);
-            console.log(`[MERGE_DWG] item: ${JSON.stringify(item)}`);
+            console.warn(`[MERGE_DWG] item: ${JSON.stringify(item)}`);
             //console.log(`[SCALE_MERGE_DWG]  parent transform: (${parentTransform.x}, ${parentTransform.y}, ${parentTransform.scale})`);
             
-            if (item.type && item.type.toLowerCase() === 'insertdwg') {
+            if (item.type && item.type === 'insertDwg') {
                 // Handle nested insertDwg
                 const nestedDrawingName = item.drawingName;
                 console.log(`[MERGE_DWG] Found nested insertDwg item for drawing "${nestedDrawingName}" at offsets (${item.xOffset || 0}, ${item.yOffset || 0})`);
@@ -419,14 +518,14 @@ class MergeAndRedraw {
                 }
                                 
                 // Add the nested insertDwg item to the list
-                allUnindexedItems.push(processedInsertDwgItem);
-                console.log(`[MERGE_DWG] Added nested insertDwg item for "${nestedDrawingName}" to unindexed items list`);
+               // allUnindexedItems.push(processedInsertDwgItem);
+               // console.log(`[MERGE_DWG] Added nested insertDwg item for "${nestedDrawingName}" to unindexed items list`);
                 
                 // Process the nested drawing recursively if not already processed
                 if (nestedDrawingName && !processedDrawings.has(nestedDrawingName)) {
                     processedDrawings.add(nestedDrawingName);                                                           
                     // Process the nested drawing with the intersection clip region
-                    this.mergeDrawingItems(item, allUnindexedItems, allIndexedItemsByNumber, processedDrawings, dwgClipRegion);
+                    this.mergeDrawingItems(item, allUnindexedItems, allIndexedItemsByNumber, allTouchZonesByCmd, processedDrawings, dwgClipRegion);
                 } else if (nestedDrawingName) {
                     console.log(`[MERGE_DWG] Drawing "${nestedDrawingName}" already processed, skipping content processing`);
                 }
@@ -441,7 +540,7 @@ class MergeAndRedraw {
                 itemTransform.y = itemTransform.y * dwgTransform.scale + dwgTransform.y;
                 itemTransform.scale = itemTransform.scale *  dwgTransform.scale;
                 processedItem.transform = itemTransform;
-                console.log(`[MERGE_DWG] Added unindexed Item  ${JSON.stringify(processedItem)}`);
+                console.warn(`[MERGE_DWG] Added unindexed Item  ${JSON.stringify(processedItem)}`);
                 allUnindexedItems.push(processedItem);
             }
         }
@@ -454,8 +553,8 @@ class MergeAndRedraw {
             const processedItem = {...item};
             processedItem.clipRegion = dwgClipRegion;
             const itemTransform = {...processedItem.transform};
-            itemTransform.x += itemTransform.x * dwgTransform.scale + dwgTransform.x;
-            itemTransform.y += itemTransform.y * dwgTransform.scale + dwgTransform.y;
+            itemTransform.x = itemTransform.x * dwgTransform.scale + dwgTransform.x;
+            itemTransform.y = itemTransform.y * dwgTransform.scale + dwgTransform.y;
             itemTransform.scale = itemTransform.scale *  dwgTransform.scale;
             processedItem.transform = itemTransform;
             
@@ -475,12 +574,12 @@ class MergeAndRedraw {
                processedItem.clipRegion = {...currentItem.clipRegion};
                console.log(`[MERGE_DWG_UPDATE] Update existing item with index ${numericIdx} to ${JSON.stringify(processedItem)}`);
             }    
-            console.log(`[MERGE_DWG] Added indexed Item  ${JSON.stringify(processedItem)}`);
+            console.warn(`[MERGE_DWG] Added indexed Item  ${JSON.stringify(processedItem)}`);
             allIndexedItemsByNumber[numericIdx] = processedItem;
         }
         
         console.log(`[MERGE_DWG] Completed merging items from "${drawingName}" at ${new Date().toISOString()}`);
-        console.log(`[MERGE_DWG] Current status: ${allUnindexedItems.length} unindexed items, ${Object.keys(allIndexedItemsByNumber).length} different indices, ${Object.keys(this.drawingManagerState.allTouchZonesByCmd).length} touchZones `);
+        console.log(`[MERGE_DWG] Current status: ${allUnindexedItems.length} unindexed items, ${Object.keys(allIndexedItemsByNumber).length} different indices, ${Object.keys(allTouchZonesByCmd).length} touchZones `);
     }
 
     // Get current state for debugging

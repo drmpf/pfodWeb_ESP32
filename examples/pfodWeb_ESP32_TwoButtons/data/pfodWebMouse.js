@@ -11,6 +11,11 @@
 window.pfodWebMouse = {
   setupEventListeners: function(drawingViewer) {
     const canvas = drawingViewer.canvas;
+    
+    // Initialize touchActionBackups on global object only if it doesn't exist to preserve existing backups
+    if (window.pfodWebMouse.touchActionBackups === undefined) {
+      window.pfodWebMouse.touchActionBackups = null;
+    }
 
     canvas.addEventListener('mousedown', (e) => this.handleMouseDown.call(drawingViewer, e));
     canvas.addEventListener('mousemove', (e) => this.handleMouseMove.call(drawingViewer, e));
@@ -20,6 +25,18 @@ window.pfodWebMouse = {
     canvas.addEventListener('contextmenu', function(e) {
       e.preventDefault(); // Prevent context menu
     });
+    
+    // Prevent browser drag behavior on canvas
+    canvas.addEventListener('dragstart', function(e) {
+      e.preventDefault(); // Prevent canvas from being dragged
+    });
+    
+    // Disable canvas selection and drag
+    canvas.style.userSelect = 'none';
+    canvas.style.webkitUserSelect = 'none';
+    canvas.style.msTouchAction = 'none';
+    canvas.style.touchAction = 'none';
+    canvas.draggable = false;
 
     // Touch events for mobile support
     canvas.addEventListener('touchstart', (e) => this.handleMouseDown.call(drawingViewer, e.touches[0]));
@@ -32,8 +49,11 @@ window.pfodWebMouse = {
 
   // Mouse and touch event handlers
   handleMouseDown: function(e) {
+    console.warn(`[MOUSE_DOWN] called handleMouseDown`);
     const currentDrawingData = this.drawingManager.getCurrentDrawingData();
     if (!currentDrawingData) return;
+
+    const drawingName = this.drawingManager.getMainDrawingName();
 
     // Get canvas-relative coordinates
     const rect = this.canvas.getBoundingClientRect();
@@ -58,6 +78,7 @@ window.pfodWebMouse = {
 
     // Update touch state
     console.log(`[MOUSE_DOWN] Setting touchState.isDown = true`);
+    this.touchState.wasDown = this.touchState.isDown;
     this.touchState.isDown = true;
     this.touchState.startX = x;
     this.touchState.startY = y;
@@ -66,6 +87,56 @@ window.pfodWebMouse = {
     this.touchState.startTime = Date.now();
     this.touchState.hasDragged = false;
     this.touchState.hasEnteredZones.clear();
+
+    
+      // Make a complete backup copy of ALL drawing state including touchZones, touchActions, and touchActionInputs
+      const unindexedBackup = JSON.parse(JSON.stringify(this.drawingManager.getUnindexedItems(drawingName)));
+      const indexedBackup = JSON.parse(JSON.stringify(this.drawingManager.getIndexedItems(drawingName)));
+      const transformBackup = JSON.parse(JSON.stringify(this.drawingManager.getTransform(drawingName)));
+      
+      // Backup touchZones from both per-drawing and merged collections
+      const touchZonesByCmd = this.drawingManager.getTouchZonesByCmd(drawingName);
+      const touchZonesBackup = JSON.parse(JSON.stringify(touchZonesByCmd));
+      const allTouchZonesBackup = JSON.parse(JSON.stringify(this.mergeAndRedraw.getAllTouchZonesByCmd()));
+      
+      // Backup merged items from drawingManagerState
+      const allUnindexedItemsBackup = JSON.parse(JSON.stringify(this.mergeAndRedraw.getAllUnindexedItems()));
+      const allIndexedItemsByNumberBackup = JSON.parse(JSON.stringify(this.mergeAndRedraw.getAllIndexedItemsByNumber()));
+      
+      // Backup touchActions and touchActionInputs (using correct property names)
+      const touchActionsBackup = (this.drawingManager.touchActionsByCmd && this.drawingManager.touchActionsByCmd[drawingName]) ? 
+        JSON.parse(JSON.stringify(this.drawingManager.touchActionsByCmd[drawingName])) : {};
+      const touchActionInputsBackup = (this.drawingManager.touchActionInputsByCmd && this.drawingManager.touchActionInputsByCmd[drawingName]) ? 
+        JSON.parse(JSON.stringify(this.drawingManager.touchActionInputsByCmd[drawingName])) : {};
+
+      // Get current clip area from drawing data
+      const drawingData = this.drawingManager.getDrawingData(drawingName);
+      const clipAreaBackup = drawingData ? {
+        x: drawingData.x || 0,
+        y: drawingData.y || 0,
+        width: drawingData.data ? drawingData.data.x : 0,
+        height: drawingData.data ? drawingData.data.y : 0
+      } : null;
+
+      console.warn(`[TOUCH_ACTION] Creating INITIAL backup: ${unindexedBackup.length} unindexed items, ${Object.keys(indexedBackup).length} indexed items, ${Object.keys(touchZonesBackup).length} touchZones, ${Object.keys(allTouchZonesBackup).length} merged touchZones, ${allUnindexedItemsBackup.length} merged unindexed items, ${Object.keys(allIndexedItemsByNumberBackup).length} merged indexed items, ${Object.keys(touchActionsBackup).length} touchActions, ${Object.keys(touchActionInputsBackup).length} touchActionInputs, transform (${transformBackup.x}, ${transformBackup.y}, ${transformBackup.scale}), and clip area`);
+    // copy current dwg state
+      // Store the complete backup for restoration when mouse is released
+      console.log(`[TOUCH_ACTION] DEBUG - Creating backup on object:`, this);
+      console.log(`[TOUCH_ACTION] DEBUG - Object constructor:`, this.constructor?.name);
+      // Store backup on the global pfodWebMouse object so it's accessible from restoration calls
+      window.pfodWebMouse.touchActionBackups = {
+        unindexed: unindexedBackup,
+        indexed: indexedBackup,
+        transform: transformBackup,
+        clipArea: clipAreaBackup,
+        touchZonesByCmd: touchZonesBackup,
+        allTouchZonesByCmd: allTouchZonesBackup,
+        allUnindexedItems: allUnindexedItemsBackup,
+        allIndexedItemsByNumber: allIndexedItemsByNumberBackup,
+        touchActions: touchActionsBackup,
+        touchActionInputs: touchActionInputsBackup
+      };
+
 
     // Find the touchZone at this position
     const foundTouchZone = window.pfodWebMouse.findTouchZoneAt.call(this, x, y, colPixelsHalf9mm, rowPixelsHalf9mm);
@@ -82,8 +153,8 @@ window.pfodWebMouse = {
       console.log(`Mouse DOWN in touchZone: cmd=${foundTouchZone.cmd}, filter=${foundTouchZone.filter}`);
       window.pfodWebMouse.handleTouchZoneActivation.call(this, foundTouchZone, TouchZoneFilters.DOWN, x, y);
     }
-    // If we found a touchZone with a DOWN_UP filter, handle it show touchActions but no msg yet
-    if (foundTouchZone && (foundTouchZone.filter & TouchZoneFilters.DOWN_UP)) {
+    // If we found a touchZone with a DOWN_UP / DOWN_DRAG_UP filter, handle it show touchActions but no msg yet
+    if (foundTouchZone && (foundTouchZone.filter & TouchZoneFilters.DOWN_DRAG_UP)) {
       console.log(`Mouse DOWN in touchZone: cmd=${foundTouchZone.cmd}, filter=${foundTouchZone.filter}`);
       window.pfodWebMouse.handleTouchZoneActivation.call(this, foundTouchZone, TouchZoneFilters.DOWN, x, y, false);
     }
@@ -173,18 +244,18 @@ window.pfodWebMouse = {
 
       // Handle DRAG events for current touchZone
       if (currentTouchZone && (currentTouchZone.filter & TouchZoneFilters.DRAG)) {
-        console.log(`[MOUSE_DRAG] in touchZone: cmd=${currentTouchZone.cmd}`);
+        console.warn(`[MOUSE_DRAG] in touchZone: cmd=${currentTouchZone.cmd}`);
         window.pfodWebMouse.handleTouchZoneActivation.call(this, currentTouchZone, TouchZoneFilters.DRAG, x, y);
       }
       // Handle DRAG events for current touchZone
-      if (currentTouchZone && (currentTouchZone.filter & TouchZoneFilters.DOWN_UP)) {
+      if (currentTouchZone && (currentTouchZone.filter & TouchZoneFilters.DOWN_DRAG_UP)) {
         console.log(`[MOUSE_DRAG] in touchZone: cmd=${currentTouchZone.cmd}`);
         window.pfodWebMouse.handleTouchZoneActivation.call(this, currentTouchZone, TouchZoneFilters.DRAG, x, y,false); // show but not send
       }
 
       // Check if we've left the original touchzone that started the drag
       if (this.touchState.targetTouchZone && !currentTouchZone) {
-        console.log('[MOUSE_DRAG] Left original touchzone area - restoring touchActions and processing pending responses');
+        console.warn('[MOUSE_DRAG] Left original touchzone area - restoring touchActions and processing pending responses');
 
         // Restore from any active touchActions FIRST to get back to basic state
         const drawingName = this.drawingManager.currentDrawingName;
@@ -200,6 +271,7 @@ window.pfodWebMouse = {
         }
 
         // Reset mouse state since we've left the drag area
+        this.touchState.wasDown = this.touchState.isDown;
         this.touchState.isDown = false;
         this.touchState.targetTouchZone = null;
         this.touchState.hasEnteredZones.clear();
@@ -221,7 +293,7 @@ window.pfodWebMouse = {
       this.touchState.longPressTimer = null;
     }
 
-    // Handle UP and DOWN_UP events for current touchZone
+    // Handle UP and DOWN_DRAG_UP events for current touchZone
     if (this.touchState.targetTouchZone) {
       // Handle UP filter - Works
       if (this.touchState.targetTouchZone.filter & TouchZoneFilters.UP) {
@@ -229,31 +301,32 @@ window.pfodWebMouse = {
         window.pfodWebMouse.handleTouchZoneActivation.call(this, this.touchState.targetTouchZone, TouchZoneFilters.UP, x, y);
       }
 
-      // Handle DOWN_UP filter - only sends on finger up - Works
-      if (this.touchState.targetTouchZone.filter & TouchZoneFilters.DOWN_UP) {
+      // Handle DOWN_DRAG_UP filter - only sends on finger up - Works
+      if (this.touchState.targetTouchZone.filter & TouchZoneFilters.DOWN_DRAG_UP) {
         console.log(`DOWN_UP in touchZone: cmd=${this.touchState.targetTouchZone.cmd}`);
-        window.pfodWebMouse.handleTouchZoneActivation.call(this, this.touchState.targetTouchZone, TouchZoneFilters.DOWN_UP, x, y);
+        window.pfodWebMouse.handleTouchZoneActivation.call(this, this.touchState.targetTouchZone, TouchZoneFilters.DOWN_DRAG_UP, x, y);
       }
     }
 
-    // Restore from any active touchActions FIRST to get back to basic state
+    // Reset touch state FIRST to allow final redraw
+    console.log(`[MOUSE_UP] Setting touchState.isDown = false`);
+    this.touchState.wasDown = this.touchState.isDown;
+    this.touchState.isDown = false;
+
+    // Restore from any active touchActions to get back to basic state
     const drawingName = this.drawingManager.currentDrawingName;
     if (this.touchState.targetTouchZone && (this.touchState.targetTouchZone.filter & TouchZoneFilters.CLICK)) {
         // SKIP RESTORE
     } else {
       if (drawingName) {
         window.pfodWebMouse.restoreFromTouchAction(this, drawingName);
-        // Immediately redraw to show the restored state
+        // Immediately redraw to show the restored state - now that mouse is up
         this.mergeAndRedraw.redrawCanvas();
       }
     }
 
     // THEN process any pending responses that were queued while mouse was down
     this.processPendingResponses();
-
-    // Reset touch state
-    console.log(`[MOUSE_UP] Setting touchState.isDown = false`);
-    this.touchState.isDown = false;
     this.touchState.targetTouchZone = null;
     this.touchState.hasEnteredZones.clear();
   },
@@ -277,6 +350,7 @@ window.pfodWebMouse = {
       }
 
       // Reset touch state
+      this.touchState.wasDown = this.touchState.isDown;
       this.touchState.isDown = false;
       this.touchState.targetTouchZone = null;
       this.touchState.hasEnteredZones.clear();
@@ -391,14 +465,29 @@ window.pfodWebMouse = {
   //        filter: filter,
   //        centered: "true"
   //    }
-  findTouchZoneAt: function(x, y, colExtra, rowExtra) { // row col extra in dwg coords
-    //console.warn(`[FIND_TOUCH_ZONE] findTouchZoneAt called with x:${x} y:${y} colExtra:${colExtra} rowExtra:${rowExtra}`);
+  
+  // row col extra in dwg coords
+  findTouchZoneAt: function(x, y, colExtra, rowExtra) { 
+    console.warn(`[FIND_TOUCH_ZONE] findTouchZoneAt called with x:${x} y:${y} colExtra:${colExtra} rowExtra:${rowExtra}`);
 
     // Collect all visible touchZones
     let visibleTouchZones = [];
 
+    //always use touchActionBackups
+    
     // Create array from touchZonesByCmd values
-    const allTouchZones = this.mergeAndRedraw.getAllTouchZonesByCmd();
+    // Debug check for undefined issues during drag
+    if (!this.mergeAndRedraw) {
+        console.error(`[FIND_TOUCH_ZONE] this.mergeAndRedraw is undefined`);
+        return null;
+    }
+    
+    const allTouchZones = window.pfodWebMouse.touchActionBackups?.allTouchZonesByCmd;
+    console.log(`[FIND_TOUCH_ZONE] DEBUG allTouchZonesByCmd returned ${Object.keys(allTouchZones || {}).length} touchZones:`, Object.keys(allTouchZones || {}));
+    if (allTouchZones === undefined) {
+        console.error(`[FIND_TOUCH_ZONE] allTouchZonesByCmd returned undefined during ${this.touchState?.isDown ? 'DRAG' : 'NORMAL'} operation`);
+        return null;
+    }
     for (const cmd in allTouchZones) {
       const zone = allTouchZones[cmd];
 
@@ -407,6 +496,7 @@ window.pfodWebMouse = {
         visibleTouchZones.push(zone);
       }
     }
+    console.warn(`[FIND_TOUCH_ZONE] number of visible touchZones ${visibleTouchZones.length}`);
 
     // Sort by idx (high idx first) last one wins if it over lays earlier one
     //visibleTouchZones.sort((a, b) => (b.idx || 0) - (a.idx || 0));
@@ -427,7 +517,7 @@ window.pfodWebMouse = {
       bounds.bottom += rowExtra;
       bounds.width = bounds.right - bounds.left;
       bounds.height = bounds.bottom - bounds.top;
-      //console.warn(`[FIND_TOUCH_ZONE] TouchZone: cmd=${zone.cmd}, left:${bounds.left} right:${bounds.right} top:${bounds.top} bottom:${bounds.bottom}`);
+      console.warn(`[FIND_TOUCH_ZONE] TouchZone: cmd=${zone.cmd}, left:${bounds.left} right:${bounds.right} top:${bounds.top} bottom:${bounds.bottom}`);
       // Check if point is inside bounds
       let insideZone = (x >= bounds.left && x <= bounds.left + bounds.width &&
         y >= bounds.top && y <= bounds.top + bounds.height);
@@ -442,7 +532,7 @@ window.pfodWebMouse = {
         current_colMin = colMin;
         current_rowMin = rowMin;
         currentBounds = bounds;
-        // console.warn(`[FIND_TOUCH_ZONE] TouchZone: cmd=${currentZone.cmd}, colMin:${colMin} rowMin:${rowMin})`);
+         console.warn(`[FIND_TOUCH_ZONE] TouchZone: cmd=${currentZone.cmd}, colMin:${colMin} rowMin:${rowMin})`);
         continue;
       } else { // have current
         let currentIdx = currentZone.idx;
@@ -459,7 +549,7 @@ window.pfodWebMouse = {
             continue;
           }
         } else { // same idx so compare overlaps  
-          // console.warn(`[FIND_TOUCH_ZONE] TouchZone: cmd=${zone.cmd}, colMin:${colMin} rowMin:${rowMin})`);
+           console.warn(`[FIND_TOUCH_ZONE] TouchZone: cmd=${zone.cmd}, colMin:${colMin} rowMin:${rowMin})`);
 
           // else // continue to check overlaps
           // Returns true if `a` contains `b`
@@ -543,9 +633,9 @@ window.pfodWebMouse = {
       }
     }
     if (currentZone) {
-      console.log(`[FIND_TOUCH_ZONE] returning TouchZone: cmd=${currentZone.cmd}`);
+      console.warn(`[FIND_TOUCH_ZONE] returning TouchZone: cmd=${currentZone.cmd}`);
     } else {
-      console.log(`[FIND_TOUCH_ZONE] returning TouchZone: null`);
+      console.warn(`[FIND_TOUCH_ZONE] returning TouchZone: null`);
     }
     return currentZone; // the one found
   },
@@ -671,7 +761,7 @@ window.pfodWebMouse = {
     console.log(`[TOUCH_ZONE]  Rounded to nearest int: col=${col}, row=${row} (range 0,0 to ${xSize},${ySize})`);
 
     // Get the drawing name
-    const drawingName = touchZone.drawingName || this.drawingManager.currentDrawingName;
+    const drawingName = this.drawingManager.currentDrawingName; //touchZone.drawingName || 
 
     // Check for touchActionInput first - it runs before other touchActions
     const touchActionInput = this.drawingManager.getTouchActionInput(drawingName, touchZone.cmd);
@@ -737,8 +827,7 @@ window.pfodWebMouse = {
     console.log(`[TOUCH_ACTION] executeTouchAction Checking for touchAction: drawing=${drawingName}, cmd=${cmd} touchType=${touchType}`);
 
     // REQUIREMENT: Always start from basic (untouched) drawing
-    // If there's a previous touchAction backup, restore it first
-    window.pfodWebMouse.restoreFromTouchAction(this, drawingName);
+    // Only make backup once - don't restore during drag operations
 
     // Get the touchAction for this cmd
     const touchActions = this.drawingManager.getTouchAction(drawingName, cmd);
@@ -750,68 +839,118 @@ window.pfodWebMouse = {
 
     console.log(`[TOUCH_ACTION] Found touchAction with ${touchActions.length} actions for cmd=${cmd}, touchType=${touchType}`);
 
-    // Make a backup copy of the drawing's indexed and unindexed items, transform state, and clip area (basic state)
-    const unindexedBackup = JSON.parse(JSON.stringify(this.drawingManager.getUnindexedItems(drawingName)));
-    const indexedBackup = JSON.parse(JSON.stringify(this.drawingManager.getIndexedItems(drawingName)));
-    const transformBackup = JSON.parse(JSON.stringify(this.drawingManager.getTransform(drawingName)));
+    
 
-    // Get current clip area from drawing data
-    const drawingData = this.drawingManager.getDrawingData(drawingName);
-    const clipAreaBackup = drawingData ? {
-      x: drawingData.x || 0,
-      y: drawingData.y || 0,
-      width: drawingData.data ? drawingData.data.x : 0,
-      height: drawingData.data ? drawingData.data.y : 0
-    } : null;
-
-    console.log(`[TOUCH_ACTION] Backing up basic state: ${unindexedBackup.length} unindexed items, ${Object.keys(indexedBackup).length} indexed items, transform (${transformBackup.x}, ${transformBackup.y}, ${transformBackup.scale}), and clip area`);
-
-    // Store the backup for later restoration when HTTP response is received or next touchAction is triggered
-    if (!this.touchActionBackups) {
-      this.touchActionBackups = {};
-    }
-    this.touchActionBackups[drawingName] = {
-      unindexed: unindexedBackup,
-      indexed: indexedBackup,
-      transform: transformBackup,
-      clipArea: clipAreaBackup
-    };
-
+    // Get the backup before creating the pseudo response
+    const backup = window.pfodWebMouse.touchActionBackups;
+    
     // Create a pseudo update response with the touchAction items
     const pseudoUpdateResponse = {
       pfodDrawing: 'update',
       name: drawingName,
       items: touchActions.map(actionItem => {
         const item = JSON.parse(JSON.stringify(actionItem));
+        
+        if (item.idx !== undefined) {
+          const backupIndexedItem = backup.indexed[item.idx];
+          if (!backupIndexedItem) {
+            console.error(`[TOUCH_ACTION] Processing touchAction but no dwg item for this index`, JSON.stringify(item,null,2));
+            return null; // Return null for invalid items, they'll be filtered out
+          }
+          console.warn(`[TOUCH_ACTION] Processing touchAction to update `, JSON.stringify(backupIndexedItem,null,2));
+          
+          // Apply special touchZone values if they exist (support both string and numeric formats)
+          if (item.xOffset === 'COL' || item.xOffset === TouchZoneSpecialValues.TOUCHED_COL) {
+            item.xOffset = col;
+            console.log(`[TOUCH_ACTION] Replaced xOffset COL with ${col}`);
+          } else if (item.xOffset === 'ROW' || item.xOffset === TouchZoneSpecialValues.TOUCHED_ROW) {
+            item.xOffset = row;
+            console.log(`[TOUCH_ACTION] Replaced xOffset ROW with ${row}`);
+          }
+          if (item.yOffset === 'ROW' || item.yOffset === TouchZoneSpecialValues.TOUCHED_ROW) {
+            item.yOffset = row;
+            console.log(`[TOUCH_ACTION] Replaced yOffset ROW with ${row}`);
+          } else if (item.yOffset === 'COL' || item.yOffset === TouchZoneSpecialValues.TOUCHED_COL) {
+            item.yOffset = col;
+            console.log(`[TOUCH_ACTION] Replaced yOffset COL with ${col}`);
+          }
 
-        // Apply special touchZone values if they exist (support both string and numeric formats)
-        if (item.xOffset === 'COL' || item.xOffset === TouchZoneSpecialValues.TOUCHED_COL) {
-          item.xOffset = col;
-          console.log(`[TOUCH_ACTION] Replaced xOffset COL with ${col}`);
-        } else if (item.xOffset === 'ROW' || item.xOffset === TouchZoneSpecialValues.TOUCHED_ROW) {
-          item.xOffset = row;
-          console.log(`[TOUCH_ACTION] Replaced xOffset ROW with ${row}`);
-        }
-        if (item.yOffset === 'ROW' || item.yOffset === TouchZoneSpecialValues.TOUCHED_ROW) {
-          item.yOffset = row;
-          console.log(`[TOUCH_ACTION] Replaced yOffset ROW with ${row}`);
-        } else if (item.yOffset === 'COL' || item.yOffset === TouchZoneSpecialValues.TOUCHED_COL) {
-          item.yOffset = col;
-          console.log(`[TOUCH_ACTION] Replaced yOffset COL with ${col}`);
-        }
+                    // Apply special touchZone values if they exist (support both string and numeric formats)
+          if (item.xSize === 'COL' || item.xSize === TouchZoneSpecialValues.TOUCHED_COL) {
+            item.xSize = col;
+            console.log(`[TOUCH_ACTION] Replaced xSize COL with ${col}`);
+          } else if (item.xSize === 'ROW' || item.xSize === TouchZoneSpecialValues.TOUCHED_ROW) {
+            item.xSize = row;
+            console.log(`[TOUCH_ACTION] Replaced xSize ROW with ${row}`);
+          }
+          if (item.ySize === 'ROW' || item.ySize === TouchZoneSpecialValues.TOUCHED_ROW) {
+            item.ySize = row;
+            console.log(`[TOUCH_ACTION] Replaced ySize ROW with ${row}`);
+          } else if (item.ySize === 'COL' || item.ySize === TouchZoneSpecialValues.TOUCHED_COL) {
+            item.ySize = col;
+            console.log(`[TOUCH_ACTION] Replaced ySize COL with ${col}`);
+          }
 
-        return item;
-      })
+          // Apply special touchZone values for intValue if item is a value type
+          if (item.type === 'value' && item.intValue !== undefined) {
+            if (item.intValue === 'COL' || item.intValue === TouchZoneSpecialValues.TOUCHED_COL) {
+              item.intValue = col;
+              console.log(`[TOUCH_ACTION] Replaced intValue COL with ${col}`);
+            } else if (item.intValue === 'ROW' || item.intValue === TouchZoneSpecialValues.TOUCHED_ROW) {
+              item.intValue = row;
+              console.log(`[TOUCH_ACTION] Replaced intValue ROW with ${row}`);
+            }
+          }
+
+          // Add transform and clipRegion from backup
+          item.transform = backupIndexedItem.transform;// || { x: 0, y: 0, scale: 1 };
+          item.clipRegion = backupIndexedItem.clipRegion;// || { x: 0, y: 0, width: 100, height: 20 };
+          
+          console.log(`[TOUCH_ACTION] Processing touchAction as pseudo update `, JSON.stringify(item,null,2));
+          return item;
+          
+        } else {
+          console.error(`[TOUCH_ACTION] Processing touchAction but it has no index`, JSON.stringify(item,null,2));
+          return null; // Return null for items without index
+        }
+      }).filter(item => item !== null)
     };
 
     console.log(`[TOUCH_ACTION] Processing touchAction as pseudo update with ${pseudoUpdateResponse.items.length} items`);
 
-    // Process the pseudo update response normally - this handles push/pop/hide/unhide/erase correctly
-    this.processDrawingData(pseudoUpdateResponse, null);
+    // Create a working copy of the backup to apply touchAction changes
+    const workingCopy = {
+      unindexed: JSON.parse(JSON.stringify(backup.unindexed)),
+      indexed: JSON.parse(JSON.stringify(backup.indexed)),
+      allTouchZonesByCmd: JSON.parse(JSON.stringify(backup.allTouchZonesByCmd)),
+      allUnindexedItems: JSON.parse(JSON.stringify(backup.allUnindexedItems)),
+      allIndexedItemsByNumber: JSON.parse(JSON.stringify(backup.allIndexedItemsByNumber))
+    };
+    console.log(`[TOUCH_ACTION_DEBUG] Created working copy - unindexed: ${workingCopy.allUnindexedItems.length}, indexed keys: [${Object.keys(workingCopy.allIndexedItemsByNumber).join(', ')}], touchZones: [${Object.keys(workingCopy.allTouchZonesByCmd).join(', ')}]`);
 
-    // Trigger a redraw to show the touchAction effects
-    console.log(`[TOUCH_ACTION] Triggering redraw to display touchAction effects`);
-    this.mergeAndRedraw.redrawCanvas();
+
+    // Apply touchAction changes to the working copy using the processed items from pseudoUpdateResponse
+    pseudoUpdateResponse.items.forEach(processedItem => {
+      console.log(`[TOUCH_ACTION] Applying processed item to working copy:`, JSON.stringify(processedItem, null, 2));
+      
+      // Update the working copy's indexed items directly with the processed item that has proper transform and clipRegion
+      if (processedItem.idx !== undefined) {
+        workingCopy.indexed[processedItem.idx] = processedItem;
+        workingCopy.allIndexedItemsByNumber[processedItem.idx] = processedItem;
+        console.log(`[TOUCH_ACTION] Updated working copy indexed item ${processedItem.idx} with processed touchAction item`);
+        console.log(`[TOUCH_ACTION_DEBUG] Working copy item ${processedItem.idx} after update:`, JSON.stringify(workingCopy.allIndexedItemsByNumber[processedItem.idx], null, 2));
+      }
+    });
+
+    // Apply working copy to drawingManagerState for redraw
+    this.drawingManager.indexedItems[drawingName] = workingCopy.indexed;
+    this.mergeAndRedraw.drawingManagerState.allTouchZonesByCmd = workingCopy.allTouchZonesByCmd;
+    this.mergeAndRedraw.drawingManagerState.allUnindexedItems = workingCopy.allUnindexedItems;
+    this.mergeAndRedraw.drawingManagerState.allIndexedItemsByNumber = workingCopy.allIndexedItemsByNumber;
+
+    // Trigger a redraw to show the touchAction effects - no merge needed since we updated the state directly
+    console.log(`[TOUCH_ACTION] Triggering redraw to display touchAction effects using working copy`);
+    this.mergeAndRedraw.redrawCanvas(workingCopy.allUnindexedItems,workingCopy.allIndexedItemsByNumber,workingCopy.allTouchZonesByCmd,true); // force redraw
   },
 
   // Execute touchActionInput - opens text dialog and handles response
@@ -1077,17 +1216,62 @@ window.pfodWebMouse = {
 
   // Restore original drawing state after touchAction (called when HTTP response received)
   restoreFromTouchAction: function(drawingViewer, drawingName) {
-    if (!drawingViewer.touchActionBackups || !drawingViewer.touchActionBackups[drawingName]) {
-      return; // No backup to restore
+
+    console.log(`[TOUCH_ACTION] Restoring complete original state for ${drawingName} after HTTP response`);
+    console.log(`[TOUCH_ACTION] DEBUG - Restoring on object:`, this);
+    console.log(`[TOUCH_ACTION] DEBUG - Object constructor:`, this.constructor?.name);
+    console.log(`[TOUCH_ACTION] DEBUG - touchActionBackups exists:`, !!window.pfodWebMouse.touchActionBackups);
+
+    const backup = window.pfodWebMouse.touchActionBackups;
+    
+    if (!backup) {
+      console.warn(`[TOUCH_ACTION] No backup found for restoration, skipping restore operation`);
+      return;
     }
 
-    console.log(`[TOUCH_ACTION] Restoring original items for ${drawingName} after HTTP response`);
-
-    const backup = drawingViewer.touchActionBackups[drawingName];
-
-    // Restore the backed up items, transform state, and clip area
+    // Restore ALL backed up data directly - no merge operations needed
+    if (backup.unindexed) {
     drawingViewer.drawingManager.unindexedItems[drawingName] = backup.unindexed;
+    } else {
+     console.warn(`[TOUCH_ACTION] no unindexed to restoring`);
+    }
+      
+    if (backup.indexed) {
     drawingViewer.drawingManager.indexedItems[drawingName] = backup.indexed;
+    } else {
+     console.warn(`[TOUCH_ACTION] no indexed to restoring`);
+    }
+
+    // Restore touchZones to both per-drawing and merged collections
+    if (backup.touchZonesByCmd) {
+      drawingViewer.drawingManager.touchZonesByCmd[drawingName] = backup.touchZonesByCmd;
+    }
+    if (backup.allTouchZonesByCmd) {
+      // Restore merged touchZones directly to avoid waiting for merge operation
+      drawingViewer.mergeAndRedraw.drawingManagerState.allTouchZonesByCmd = backup.allTouchZonesByCmd;
+    }
+    
+    // Restore merged items directly to drawingManagerState
+    if (backup.allUnindexedItems) {
+      drawingViewer.mergeAndRedraw.drawingManagerState.allUnindexedItems = backup.allUnindexedItems;
+    }
+    if (backup.allIndexedItemsByNumber) {
+      drawingViewer.mergeAndRedraw.drawingManagerState.allIndexedItemsByNumber = backup.allIndexedItemsByNumber;
+    }
+    
+    // Restore touchActions and touchActionInputs (using correct property names)
+    if (backup.touchActions) {
+      if (!drawingViewer.drawingManager.touchActionsByCmd) {
+        drawingViewer.drawingManager.touchActionsByCmd = {};
+      }
+      drawingViewer.drawingManager.touchActionsByCmd[drawingName] = backup.touchActions;
+    }
+    if (backup.touchActionInputs) {
+      if (!drawingViewer.drawingManager.touchActionInputsByCmd) {
+        drawingViewer.drawingManager.touchActionInputsByCmd = {};
+      }
+      drawingViewer.drawingManager.touchActionInputsByCmd[drawingName] = backup.touchActionInputs;
+    }
 
     // Restore transform state
     if (backup.transform) {
@@ -1098,10 +1282,8 @@ window.pfodWebMouse = {
     // as part of the drawing's permanent state during normal processing.
     // Only the transform state changes for the next update.
 
-    // Clear the backup
-    delete drawingViewer.touchActionBackups[drawingName];
+    console.log(`[TOUCH_ACTION] Restored complete state: ${backup.unindexed.length} unindexed items, ${Object.keys(backup.indexed).length} indexed items, ${Object.keys(backup.touchZonesByCmd || {}).length} touchZones, ${Object.keys(backup.allTouchZonesByCmd || {}).length} merged touchZones, ${(backup.allUnindexedItems || []).length} merged unindexed items, ${Object.keys(backup.allIndexedItemsByNumber || {}).length} merged indexed items, ${Object.keys(backup.touchActions || {}).length} touchActions, ${Object.keys(backup.touchActionInputs || {}).length} touchActionInputs, transform (${backup.transform?.x}, ${backup.transform?.y}, ${backup.transform?.scale})`);
 
-    console.log(`[TOUCH_ACTION] Restored ${backup.unindexed.length} unindexed items, ${Object.keys(backup.indexed).length} indexed items, transform (${backup.transform?.x}, ${backup.transform?.y}, ${backup.transform?.scale}), and clip area`);
   },
 
 };

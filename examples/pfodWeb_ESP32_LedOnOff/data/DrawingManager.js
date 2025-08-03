@@ -116,6 +116,7 @@ class DrawingManager {
         
         // Update the data
         this.drawingsData[drawingName].data = data;
+        this.drawingsData[drawingName].name = drawingName;
         this.drawingResponseStatus[drawingName] = true;
         
         // Ensure there are item collections for this drawing
@@ -183,9 +184,14 @@ class DrawingManager {
         }
  
         // Apply current transform if not already set
+   //     if (!touchZone.transform) {
+   //         console.warn(`Error missing transform from touchzone in drawing "${drawingName}" ${JSON.stringify(touchZone)}`);
+   //         return this;
+   //     }
+        
+                // Apply current transform to the item
         if (!touchZone.transform) {
-            console.warn(`Error missing transform from touchzone in drawing "${drawingName}" ${JSON.stringify(touchZone)}`);
-            return this;
+            touchZone.transform = {...this.getTransform(drawingName)};
         }
         
         // Add to the touchZones map - cmd is unique reference

@@ -33,6 +33,59 @@ function getActualFontSize(relativeFontSize) {
 // Import formatting utilities
 // Note: printFloatDecimals and addFormattedValueToText are now in displayTextUtils.js
 
+// Get appropriate black or white color based on background contrast
+function getBlackWhite(color) {
+    // Convert color to RGB values
+    function getRGB(color) {
+        // Handle hex colors
+        if (typeof color === 'string' && color.startsWith('#')) {
+            const hex = color.slice(1);
+            const r = parseInt(hex.substr(0, 2), 16);
+            const g = parseInt(hex.substr(2, 2), 16);
+            const b = parseInt(hex.substr(4, 2), 16);
+            return [r, g, b];
+        }
+        
+        // Handle color numbers - convert to hex first, then to RGB using xtermColorToHex
+        const hexColor = xtermColorToHex(color);
+        const hex = hexColor.slice(1);
+        const r = parseInt(hex.substr(0, 2), 16);
+        const g = parseInt(hex.substr(2, 2), 16);
+        const b = parseInt(hex.substr(4, 2), 16);
+        return [r, g, b];
+    }
+    
+    // Calculate relative luminance
+    function getLuminance(r, g, b) {
+        const [rs, gs, bs] = [r, g, b].map(c => {
+            c = c / 255;
+            return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+        });
+        return 0.2126 * rs + 0.7152 * gs + 0.0722 * bs;
+    }
+    
+    // Calculate contrast ratio between two colors
+    function getContrastRatio(lum1, lum2) {
+        const lighter = Math.max(lum1, lum2);
+        const darker = Math.min(lum1, lum2);
+        return (lighter + 0.05) / (darker + 0.05);
+    }
+    
+    const [r, g, b] = getRGB(color);
+    const colorLuminance = getLuminance(r, g, b);
+    
+    // Luminance values for pure black and white
+    const blackLuminance = 0;
+    const whiteLuminance = 1;
+    
+    // Calculate contrast ratios
+    const contrastWithBlack = getContrastRatio(colorLuminance, blackLuminance);
+    const contrastWithWhite = getContrastRatio(colorLuminance, whiteLuminance);
+    
+    // Return the color number with higher contrast
+    return contrastWithBlack > contrastWithWhite ? 0 : 15; // BLACK (0) : WHITE (15)
+}
+
 // Convert xterm 256 color index to RGB hex color
 function xtermColorToHex(colorIndex) {
     // Handle non-numeric input or out of range - use black
@@ -96,7 +149,13 @@ function xtermColorToHex(colorIndex) {
 }
 
 // Convert color value to hex - only supports integers (0-255)
-function convertColorToHex(color) {
+function convertColorToHex(color, backgroundColorNumber = null) {
+    // Handle Black/White mode (color -1)
+    if (color === -1 && backgroundColorNumber !== null) {
+        const blackWhiteColor = getBlackWhite(backgroundColorNumber);
+        return xtermColorToHex(blackWhiteColor);
+    }
+    
     // Support both integer colors and string numbers
     if (typeof color === 'number') {
         return xtermColorToHex(color);
@@ -117,6 +176,7 @@ class Redraw {
         this.drawingManagerState = null;
         
         // Drawing state
+        this.currentBackgroundColor = 0; // Store current drawing background color for Black/White mode
         
         // Canvas caching for optimization
         this.cachedCanvasWidth = 0;
@@ -152,8 +212,8 @@ class Redraw {
     }
 
     // Public interface for drawing operations
-    redrawCanvas(currentDrawingData, allUnindexedItems, allIndexedItemsByNumber) {
-        return this.redrawCanvasImpl(currentDrawingData, allUnindexedItems, allIndexedItemsByNumber);
+    redrawCanvas(currentDrawingData, allUnindexedItems, allIndexedItemsByNumber, allTouchZonesByCmd) {
+        return this.redrawCanvasImpl(currentDrawingData, allUnindexedItems, allIndexedItemsByNumber, allTouchZonesByCmd);
     }
 
 
@@ -167,10 +227,11 @@ class Redraw {
     }
 
     // Main canvas redraw implementation
-    redrawCanvasImpl(currentDrawingData, allUnindexedItems, allIndexedItemsByNumber) {
+    redrawCanvasImpl(currentDrawingData, allUnindexedItems, allIndexedItemsByNumber, allTouchZonesByCmd) {
         if (!currentDrawingData) return;
         
         console.log(`[REDRAW] Starting redraw for canvas: ${currentDrawingData.name}, size=${this.canvas.width}x${this.canvas.height} at ${new Date().toISOString()}`);
+        console.log(`[REDRAW_DEBUG] Redraw inputs - unindexed: ${allUnindexedItems.length}, indexed keys: [${Object.keys(allIndexedItemsByNumber).join(', ')}], touchZones: [${Object.keys(allTouchZonesByCmd).join(', ')}]`);
         
         // Check if canvas size has changed or this is the first draw
         const sizeChanged = !this.hasCompletedFirstDraw || this.cachedCanvasWidth !== this.canvas.width || this.cachedCanvasHeight !== this.canvas.height;
@@ -179,6 +240,7 @@ class Redraw {
         
         // Clear canvas - use cached dimensions after first draw if size hasn't changed
         const rawBackgroundColor = currentDrawingData.data ? currentDrawingData.data.color || 0 : 0; // Default to black (0)
+        this.currentBackgroundColor = rawBackgroundColor; // Store for Black/White color mode
         const backgroundColor = convertColorToHex(rawBackgroundColor);
         console.log(`[REDRAW] Setting canvas background color to: ${backgroundColor} (from raw: ${rawBackgroundColor})`);
         this.ctx.fillStyle = backgroundColor;
@@ -240,6 +302,7 @@ class Redraw {
             const itemWithIndex = allIndexedItemsByNumber[idx];
             const drawingSource = itemWithIndex.parentDrawingName || 'unknown';
             console.log(`[REDRAW] Drawing indexed item ${idx} of type ${itemWithIndex.type} from ${drawingSource}`);
+            console.log(`[REDRAW_INDEXED_DEBUG] Item ${idx} full data:`, JSON.stringify(itemWithIndex, null, 2));
             if (itemWithIndex.transform) {
                 console.log(`[REDRAW] Indexed item transform: x=${itemWithIndex.transform.x}, y=${itemWithIndex.transform.y}, scale=${itemWithIndex.transform.scale}`);
             } else {
@@ -248,7 +311,6 @@ class Redraw {
             this.drawItem(itemWithIndex);
         });
 
-        const allTouchZonesByCmd = this.drawingManagerState.allTouchZonesByCmd || {};
         Object.keys(allTouchZonesByCmd).forEach(cmd => {
             const touchZone = allTouchZonesByCmd[cmd];
             const drawingSource = touchZone.parentDrawingName || 'unknown';
@@ -322,11 +384,12 @@ class Redraw {
             }
             
             // Set default color for drawing
-            if (item.color !== undefined) {
-                const hexColor = convertColorToHex(item.color);
-                this.ctx.fillStyle = hexColor;
-                this.ctx.strokeStyle = hexColor;
+            if (item.color === undefined) {
+              item.color = -1;
             }
+            const hexColor = convertColorToHex(item.color, this.currentBackgroundColor);
+            this.ctx.fillStyle = hexColor;
+            this.ctx.strokeStyle = hexColor;
             // Dispatch to specific drawing functions based on type
             switch (item.type.toLowerCase()) {
                 case 'line':
@@ -416,6 +479,8 @@ class Redraw {
     //========== drawInsertDwg ==========
     // Draw an insertDwg item as a background rectangle
     drawInsertDwg(item) {
+        console.error('drawInsertDwg called. Should not be drawing insertDwg:', JSON.stringify(item,null,2));
+/**        
         if (!item || !item.drawingName) {
             console.error('Invalid insertDwg item or missing drawingName:', item);
             return;
@@ -441,7 +506,7 @@ class Redraw {
             console.log(`[DRAWING] insertDwg '${item.drawingName}' not loaded - skipping drawing`);
             return; // Skip drawing insertDwg if not loaded
         }
-
+**/
         /**
         // Use the drawing bounds if available
         if (item.drawingBounds) {
@@ -511,9 +576,9 @@ class Redraw {
         const text = addFormattedValueToText(item.text || '', item);
         const relativeFontSize = parseInt(item.fontSize || 0);
         const fontSize = getActualFontSize(relativeFontSize);
-        const bold = item.bold;
-        const italic = item.italic;
-        const underline = item.underline;
+        const bold = item.bold === 'true' || item.bold === true;
+        const italic = item.italic === 'true' || item.italic === true;
+        const underline = item.underline === 'true' || item.underline === true;
         const align = item.align || 'left';
 
         // Calculate actual position with transform
@@ -595,9 +660,9 @@ class Redraw {
         const textPrefix = item.text || '';
         const relativeFontSize = parseInt(item.fontSize || 0);
         const fontSize = getActualFontSize(relativeFontSize);
-        const bold = item.bold;
-        const italic = item.italic;
-        const underline = item.underline;
+        const bold = item.bold === 'true' || item.bold === true;
+        const italic = item.italic === 'true' || item.italic === true;
+        const underline = item.underline === 'true' || item.underline === true;
         const align = item.align || 'left';
         const intValue = parseFloat(item.intValue || 0);
         const max = parseFloat(item.max || 1);
@@ -797,11 +862,11 @@ class Redraw {
             const yOffset = parseFloat(item.yOffset || 0);
             
             // Default sizes to 1 if not specified
-            let xSize = parseFloat(item.xSize || 1);
-            let ySize = parseFloat(item.ySize || 1);
+            let xSize = parseFloat(item.xSize);
+            let ySize = parseFloat(item.ySize);
             
             // Get the centered flag
-            const centered = item.centered === 'true';
+            const centered = item.centered === 'true' || item.centered === true;
             
             console.log(`[DRAWING_RECTANGLE] Rectangle original properties: xOffset=${xOffset}, yOffset=${yOffset}, xSize=${xSize}, ySize=${ySize}, centered=${centered}`);
             
@@ -882,11 +947,11 @@ class Redraw {
             console.log(`[DRAWING_RECTANGLE] Rectangle after rounding: x=${roundedX}, y=${roundedY}, width=${roundedWidth}, height=${roundedHeight}`);
             
             // Determine drawing style
-            const filled = item.filled === 'true';
+            const filled = item.filled === 'true' || item.filled === true;
             console.log(`Rectangle filled: ${filled}`);
             
             // Handle rounded corners if specified
-            const rounded = item.rounded === 'true';
+            const rounded = item.rounded === 'true' || item.rounded === true;
             console.log(`[DRAWING_RECTANGLE] Rectangle rounded: ${rounded}`);
             
             // Draw the rectangle
@@ -959,7 +1024,7 @@ class Redraw {
             let ySize = parseFloat(item.ySize || 1);
             
             // Get the centered flag
-            const centered = item.centered === 'true';
+            const centered = item.centered === 'true' || item.centered === true;
             
             console.log(`[DRAWING_TOUCHZONE] TouchZone original properties: xOffset=${xOffset}, yOffset=${yOffset}, xSize=${xSize}, ySize=${ySize}, centered=${centered}`);
                        

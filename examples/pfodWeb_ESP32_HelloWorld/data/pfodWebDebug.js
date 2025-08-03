@@ -65,6 +65,7 @@ class DrawingViewer {
     // Touch state for handling mouse/touch events - instance-specific
     this.touchState = {
       isDown: false,
+      wasDown: false,
       startX: 0,
       startY: 0,
       lastX: 0,
@@ -496,16 +497,31 @@ class DrawingViewer {
     }
   }
 
-  redrawCanvas() {
+  redrawCanvas(isTouchAction = false) {
               // Update the MergeAndRedraw module with the latest state
+      console.warn(`[QUEUE] redrawCanvas isTouchAction: ${isTouchAction} isDown: ${this.touchState.isDown}`);
+              if (!this.touchState.isDown) {
+                if (this.touchState.wasDown) {
+                  this.touchState.wasDown = this.touchState.isDown;
+                   const drawingName = this.drawingManager.currentDrawingName;
+                  if (drawingName) {
+      console.warn(`[QUEUE] redrawCanvas restoreFromTouchAction: ${drawingName}`);
+                    window.pfodWebMouse.restoreFromTouchAction(this, drawingName);
+                  }
+               }
           this.mergeAndRedraw.updateState({
             ...this.drawingManager.getMergeAndRedrawState(),
             requestQueue: this.requestQueue
           });
+              }
 
           // Redraw the canvas with what we have
-          this.resizeCanvas();
-          //this.mergeAndRedraw.redrawCanvas();
+          if (isTouchAction) {
+            // For touchAction, skip resize and call mergeAndRedraw directly
+            this.mergeAndRedraw.redrawCanvas(true);
+          } else {
+            this.resizeCanvas();
+          }
    }
     
    
@@ -517,9 +533,9 @@ class DrawingViewer {
       return;
     }
     if (this.sentRequest) {
-    console.warn(`[QUEUE] processRequestQueue have sentRequest, queue length: ${this.requestQueue.length}`);
+      console.log(`[QUEUE] processRequestQueue have sentRequest, queue length: ${this.requestQueue.length}`);
     } else {
-      console.warn(`[QUEUE] processRequestQueue no sentRequest, queue length: ${this.requestQueue.length}`);
+      console.log(`[QUEUE] processRequestQueue no sentRequest, queue length: ${this.requestQueue.length}`);
     }       
     // Try to atomically set processing state from false to true
 //    if (!this.trySetProcessingQueue(false, true)) {
@@ -547,7 +563,7 @@ class DrawingViewer {
       return;
     }
 
-    console.warn(`[QUEUE] processRequestQueue current queue is:`, JSON.stringify(this.requestQueue, null, 2));
+    console.log(`[QUEUE] processRequestQueue current queue is:`, JSON.stringify(this.requestQueue, null, 2));
 
  //    this.setProcessingQueue(true); // have non-zero queue length
     // Remove the request from queue and move it to sentRequest
@@ -557,7 +573,9 @@ class DrawingViewer {
     console.warn(`[QUEUE] sentRequest is:`, JSON.stringify(this.sentRequest, null, 2));
 
     try {
-      console.warn(`[QUEUE] Processing request for "${request.drawingName}" (retry: ${request.retryCount}/${this.MAX_RETRIES})`);
+      if (request.retryCount > 0) {
+       console.warn(`[QUEUE] Processing request for "${request.drawingName}" (retry: ${request.retryCount}/${this.MAX_RETRIES})`);
+      }
 
       // Track the touchZone filter and cmd for this request being sent
       if (request.touchZoneInfo) {
@@ -682,10 +700,7 @@ class DrawingViewer {
         console.log(`[QUEUE] Added to pending queue. Total pending responses: ${this.pendingResponseQueue.length}`);
       } else {
         // Mouse is up - process immediately
-        // REQUIREMENT: Always start from basic (untouched) drawing before applying response updates
-        if (typeof window.pfodWebMouse !== 'undefined') {
-          window.pfodWebMouse.restoreFromTouchAction(this, request.drawingName);
-        }
+        // No need to restore - we'll do a full merge with the new response data
 
         console.log(`[QUEUE] Processing data for drawing "${request.drawingName}" (type: ${request.requestType})`);
         // check for {|+ menu return to load/reload dwg
@@ -714,7 +729,9 @@ class DrawingViewer {
       if (this.requestQueue.length === 0 && !this.sentRequest) {
         console.log(`[QUEUE] All drawings processed and queue is empty. Redrawing canvas with all drawing data.`);
         this.drawingManager.allDrawingsReceived = true; // this is not actually used!!
-        this.redrawCanvas();
+        console.log(`[QUEUE} Mouse isDown: ${this.touchState.isDown}`);
+
+        this.redrawCanvas(this.touchState.isDown);
         /**
         // Update the MergeAndRedraw module with the latest state
         this.mergeAndRedraw.updateState({
@@ -824,18 +841,19 @@ class DrawingViewer {
   }
 
   restoreFromTouchAction(drawingName) {
-    if (!this.touchActionBackups || !this.touchActionBackups[drawingName]) {
-      return; // No backup to restore
-    }
 
     console.log(`[TOUCH_ACTION] Restoring original items for ${drawingName} after HTTP response`);
 
-    const backup = this.touchActionBackups[drawingName];
-
+    const backup = this.touchActionBackups;
+        for (const idx in backup.indexed) {
+            const item = backup.indexed[idx];
+            console.warn(`[TOUCH_ACTION] restore indexed Item  ${JSON.stringify(item)}`);
+        }
+    
     // Restore the backed up items, transform state, and clip area
     this.drawingManager.unindexedItems[drawingName] = backup.unindexed;
     this.drawingManager.indexedItems[drawingName] = backup.indexed;
-
+    this.drawingManager.allTouchZonesByCmd = backup.allTouchZonesByCmd;
     // Restore transform state
     if (backup.transform) {
       this.drawingManager.saveTransform(drawingName, backup.transform);
@@ -845,8 +863,6 @@ class DrawingViewer {
     // as part of the drawing's permanent state during normal processing.
     // Only the transform state changes for the next update.
 
-    // Clear the backup
-    delete this.touchActionBackups[drawingName];
 
     console.log(`[TOUCH_ACTION] Restored ${backup.unindexed.length} unindexed items, ${Object.keys(backup.indexed).length} indexed items, transform (${backup.transform?.x}, ${backup.transform?.y}, ${backup.transform?.scale}), and clip area`);
   }
@@ -925,8 +941,7 @@ class DrawingViewer {
 
       console.log(`[QUEUE] Processing queued response for "${request.drawingName}"`);
 
-      // REQUIREMENT: Always start from basic (untouched) drawing before applying response updates
-      this.restoreFromTouchAction(request.drawingName);
+      // No need to restore - we'll do a full merge with the new response data
 
       // Insert name property from request since responses no longer include it
       data.name = request.drawingName;
@@ -941,15 +956,16 @@ class DrawingViewer {
     // Redraw again after processing all responses to show the latest drawing data
     if (hadPendingResponses) {
       console.log(`[QUEUE] Redrawing canvas after processing pending responses with updated drawing data`);
-
+      if (!this.touchState.isDown) {
       // Update the MergeAndRedraw module with the latest state
-      this.mergeAndRedraw.updateState({
-        ...this.drawingManager.getMergeAndRedrawState(),
-        requestQueue: this.requestQueue
-      });
+        this.mergeAndRedraw.updateState({
+          ...this.drawingManager.getMergeAndRedrawState(),
+          requestQueue: this.requestQueue
+        });
 
-      // Redraw with the updated data
-      this.resizeCanvas();
+        // Redraw with the updated data
+        this.resizeCanvas(); // resize updates state
+      }
     }
     setTimeout(() => {
      // if (this.sentRequest || this.requestQueue.length !== 0) {
@@ -1084,7 +1100,7 @@ class DrawingViewer {
   }
 
   // Resize canvas to fit the container
-  resizeCanvas() {
+  resizeCanvas(isTouchAction = false) {
     console.log(`[RESIZE_DEBUG] resizeCanvas() called for drawing: "${this.drawingManager.getMainDrawingName()}"`);
     console.log(`[RESIZE_DEBUG] URL: ${window.location.href}`);
 
@@ -1094,6 +1110,14 @@ class DrawingViewer {
     if (!logicalDrawingData) {
       console.warn('No drawing data available for resizing');
       return;
+    }
+
+    // Check if mouse is down - skip resize operations during drag
+    const isMouseDown = this.touchState && this.touchState.isDown;
+
+    if (isTouchAction || isMouseDown){
+      this.mergeAndRedraw.redrawCanvas(true);
+       return;
     }
 
     // Get the logical canvas dimensions (1-255 range)
@@ -1129,25 +1153,33 @@ class DrawingViewer {
     const expectedCanvasWidth = Math.floor(displayWidth);
     const expectedCanvasHeight = Math.floor(displayHeight);
 
+    
     // Check if both logical dimensions AND window dimensions have changed AND canvas is correctly sized
-    if (this.lastLogicalWidth === logicalWidth &&
+    if ((this.lastLogicalWidth === logicalWidth &&
       this.lastLogicalHeight === logicalHeight &&
       this.lastWindowWidth === windowWidth &&
       this.lastWindowHeight === windowHeight &&
       this.canvas.width === expectedCanvasWidth &&
-      this.canvas.height === expectedCanvasHeight) {
-      console.log(`[RESIZE] Skipping resize - dimensions unchanged: logical=${logicalWidth}x${logicalHeight}, window=${windowWidth}x${windowHeight}, canvas=${this.canvas.width}x${this.canvas.height}`);
+      this.canvas.height === expectedCanvasHeight) || isMouseDown) {
+      
+      if (isMouseDown) {
+        console.log(`[RESIZE] Skipping resize - mouse is down during drag operation`);
+      } else {
+        console.log(`[RESIZE] Skipping resize - dimensions unchanged: logical=${logicalWidth}x${logicalHeight}, window=${windowWidth}x${windowHeight}, canvas=${this.canvas.width}x${this.canvas.height}`);
+      }
       console.log(`[RESIZE_DEBUG] SKIP - Just updating state and redrawing without resize`);
       // Still update state and redraw, just don't resize canvas
       // But we still need to ensure scale factors are calculated for clip regions
       this.canvas.scaleX = this.canvas.width / logicalWidth;
       this.canvas.scaleY = this.canvas.height / logicalHeight;
       console.log(`[RESIZE_DEBUG] Scale factors maintained: X=${this.canvas.scaleX}, Y=${this.canvas.scaleY}`);
-      this.mergeAndRedraw.updateState({
+      if (!isMouseDown) {
+        this.mergeAndRedraw.updateState({
         ...this.drawingManager.getMergeAndRedrawState(),
         requestQueue: this.requestQueue
-      });
-      this.mergeAndRedraw.redrawCanvas();
+        });
+        this.mergeAndRedraw.redrawCanvas();
+      }
       return;
     }
 

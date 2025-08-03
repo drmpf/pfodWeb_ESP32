@@ -7,9 +7,21 @@
  * provided this copyright is maintained.
  */
 
+ /**
+   from Android App these can be 'c' or 'r'
+     public void updateColRows(int colPixel, int rowPixel) { // , int rc, int rr) {
+        colOffset = setFromVar(colOffset, colOffsetVar, colPixel, rowPixel);// , rc, rr);
+        rowOffset = setFromVar(rowOffset, rowOffsetVar, colPixel, rowPixel);// , rc, rr);
+        vWidth = setFromVar(vWidth, vWidthVar, colPixel, rowPixel);// , rc, rr);
+        vHeight = setFromVar(vHeight, vHeightVar, colPixel, rowPixel);// , rc, rr);
+        value = (int) setFromVar((float) value, vValueVar, colPixel, rowPixel);// , rc, rr);
+        // sortRect(); // resort after setting
+    }
+**/
+
 // JS_VERSION is available globally via window.JS_VERSION from pfodWebDebug.js
 
-function translateRawRectangle(rawRectString) {
+function translateRawRectangle(rawRectString,isTouchAction=false) {
     // Parse rectangle type from prefix
     let rectType = '';
     let content = '';
@@ -61,10 +73,61 @@ function translateRawRectangle(rawRectString) {
     
     // Parse parts: [colour]~width~height[~colOffset[~rowOffset]]
     const colour = parts[0] === '' ? undefined : parseInt(parts[0]);
-    const xSize = parseFloat(parts[1]); // width
-    const ySize = parseFloat(parts[2]); // height
-    const xOffset = parts.length > 3 && parts[3] !== '' ? parseFloat(parts[3]) : undefined;
-    const yOffset = parts.length > 4 && parts[4] !== '' ? parseFloat(parts[4]) : undefined;
+    let xSize = 1;
+    let ySize = 1;
+    // Handle isTouchAction transformations and invalid inputs
+    if (parts.length > 1 && parts[1] !== '') {
+        if (isTouchAction && parts[1] === 'c') {
+            xSize = 'COL';
+        } else if (isTouchAction && parts[1] === 'r') {
+            xSize = 'ROW';
+        } else if (!isNaN(parseFloat(parts[1]))) {
+            xSize = parseFloat(parts[1]);
+        } else {
+            xSize = 1;
+        }
+    }
+    
+    if (parts.length > 2 && parts[2] !== '') {
+        if (isTouchAction && parts[2] === 'c') {
+            ySize = 'COL';
+        } else if (isTouchAction && parts[2] === 'r') {
+            ySize = 'ROW';
+        } else if (!isNaN(parseFloat(parts[2]))) {
+            ySize = parseFloat(parts[2]);
+        } else {
+            ySize = 1;
+        }
+    }
+    
+    
+    let xOffset = 0;
+    let yOffset = 0;
+    
+    // Handle isTouchAction transformations and invalid inputs
+    if (parts.length > 3 && parts[3] !== '') {
+        if (isTouchAction && parts[3] === 'c') {
+            xOffset = 'COL';
+        } else if (isTouchAction && parts[3] === 'r') {
+            xOffset = 'ROW';
+        } else if (!isNaN(parseFloat(parts[3]))) {
+            xOffset = parseFloat(parts[3]);
+        } else {
+            xOffset = 0;
+        }
+    }
+    
+    if (parts.length > 4 && parts[4] !== '') {
+        if (isTouchAction && parts[4] === 'c') {
+            yOffset = 'COL';
+        } else if (isTouchAction && parts[4] === 'r') {
+            yOffset = 'ROW';
+        } else if (!isNaN(parseFloat(parts[4]))) {
+            yOffset = parseFloat(parts[4]);
+        } else {
+            yOffset = 0;
+        }
+    }
     
     // Create rectangle object
     const rectObject = {
@@ -75,19 +138,17 @@ function translateRawRectangle(rawRectString) {
     // Add colour if specified
     if (colour !== undefined && !isNaN(colour)) {
         rectObject.color = colour;
+    } else {
+      rectObject.color = -1;
     }
     
     // Add dimensions
     rectObject.xSize = xSize;
     rectObject.ySize = ySize;
     
-    // Add offsets if they exist
-    if (xOffset !== undefined) {
-        rectObject.xOffset = xOffset;
-    }
-    if (yOffset !== undefined) {
-        rectObject.yOffset = yOffset;
-    }
+    // Add offsets
+    rectObject.xOffset = xOffset;
+    rectObject.yOffset = yOffset;
     
     // Add rectangle properties based on type
     if (rectType.includes('R') || rectType.includes('r')) {
@@ -114,7 +175,7 @@ function translateRawRectangle(rawRectString) {
 }
 
   
-function translateRawLine(rawLineString) {
+function translateRawLine(rawLineString,isTouchAction=false) {
     // Check if this is a line item
     if (!rawLineString.startsWith('|l')) {
         throw new Error('Invalid line format: must start with |l');
@@ -144,8 +205,34 @@ function translateRawLine(rawLineString) {
     const colour = parts[0] === '' ? undefined : parseInt(parts[0]);
     const xSize = parseFloat(parts[1]); // colDelta
     const ySize = parseFloat(parts[2]); // rowDelta
-    const xOffset = parts.length > 3 && parts[3] !== '' ? parseFloat(parts[3]) : undefined;
-    const yOffset = parts.length > 4 && parts[4] !== '' ? parseFloat(parts[4]) : undefined;
+    
+    let xOffset = 0;
+    let yOffset = 0;
+    
+    // Handle isTouchAction transformations and invalid inputs
+    if (parts.length > 3 && parts[3] !== '') {
+        if (isTouchAction && parts[3] === 'c') {
+            xOffset = 'COL';
+        } else if (isTouchAction && parts[3] === 'r') {
+            xOffset = 'ROW';
+        } else if (!isNaN(parseFloat(parts[3]))) {
+            xOffset = parseFloat(parts[3]);
+        } else {
+            xOffset = 0;
+        }
+    }
+    
+    if (parts.length > 4 && parts[4] !== '') {
+        if (isTouchAction && parts[4] === 'c') {
+            yOffset = 'COL';
+        } else if (isTouchAction && parts[4] === 'r') {
+            yOffset = 'ROW';
+        } else if (!isNaN(parseFloat(parts[4]))) {
+            yOffset = parseFloat(parts[4]);
+        } else {
+            yOffset = 0;
+        }
+    }
     
     // Create line object
     const lineObject = {
@@ -156,24 +243,22 @@ function translateRawLine(rawLineString) {
     // Add colour if specified
     if (colour !== undefined && !isNaN(colour)) {
         lineObject.color = colour;
-    }
+     } else {
+      lineObject.color = -1;
+     }
     
     // Add coordinates
     lineObject.xSize = xSize;
     lineObject.ySize = ySize;
     
-    // Add offsets if they exist
-    if (xOffset !== undefined) {
-        lineObject.xOffset = xOffset;
-    }
-    if (yOffset !== undefined) {
-        lineObject.yOffset = yOffset;
-    }
+    // Add offsets
+    lineObject.xOffset = xOffset;
+    lineObject.yOffset = yOffset;
     
     return lineObject;
 }
 
-function translateRawCircle(rawCircleString) {
+function translateRawCircle(rawCircleString,isTouchAction=false) {
     // Parse circle type from prefix
     let circleType = '';
     let content = '';
@@ -208,8 +293,34 @@ function translateRawCircle(rawCircleString) {
     // Parse parts: [colour]~dRadius[~colOffset[~rowOffset]]
     const colour = parts[0] === '' ? undefined : parseInt(parts[0]);
     const radius = parseFloat(parts[1]); // dRadius
-    const xOffset = parts.length > 2 && parts[2] !== '' ? parseFloat(parts[2]) : undefined;
-    const yOffset = parts.length > 3 && parts[3] !== '' ? parseFloat(parts[3]) : undefined;
+    
+    let xOffset = 0;
+    let yOffset = 0;
+    
+    // Handle isTouchAction transformations and invalid inputs
+    if (parts.length > 2 && parts[2] !== '') {
+        if (isTouchAction && parts[2] === 'c') {
+            xOffset = 'COL';
+        } else if (isTouchAction && parts[2] === 'r') {
+            xOffset = 'ROW';
+        } else if (!isNaN(parseFloat(parts[2]))) {
+            xOffset = parseFloat(parts[2]);
+        } else {
+            xOffset = 0;
+        }
+    }
+    
+    if (parts.length > 3 && parts[3] !== '') {
+        if (isTouchAction && parts[3] === 'c') {
+            yOffset = 'COL';
+        } else if (isTouchAction && parts[3] === 'r') {
+            yOffset = 'ROW';
+        } else if (!isNaN(parseFloat(parts[3]))) {
+            yOffset = parseFloat(parts[3]);
+        } else {
+            yOffset = 0;
+        }
+    }
     
     // Create circle object
     const circleObject = {
@@ -220,15 +331,13 @@ function translateRawCircle(rawCircleString) {
     // Add colour if specified
     if (colour !== undefined && !isNaN(colour)) {
         circleObject.color = colour;
+     } else {
+      circleObject.color = -1;
     }
     
-    // Add offsets if they exist
-    if (xOffset !== undefined) {
-        circleObject.xOffset = xOffset;
-    }
-    if (yOffset !== undefined) {
-        circleObject.yOffset = yOffset;
-    }
+    // Add offsets
+    circleObject.xOffset = xOffset;
+    circleObject.yOffset = yOffset;
     
     // Add radius
     circleObject.radius = radius;
@@ -241,7 +350,7 @@ function translateRawCircle(rawCircleString) {
     return circleObject;
 }
 
-function translateRawArc(rawArcString) {
+function translateRawArc(rawArcString,isTouchAction=false) {
     // Parse arc type from prefix
     let arcType = '';
     let content = '';
@@ -278,8 +387,34 @@ function translateRawArc(rawArcString) {
     const angle = parseFloat(parts[1]); // dArcAngle
     const start = parseFloat(parts[2]); // dStartAngle
     const radius = parseFloat(parts[3]); // dRadius
-    const xOffset = parts.length > 4 && parts[4] !== '' ? parseFloat(parts[4]) : undefined;
-    const yOffset = parts.length > 5 && parts[5] !== '' ? parseFloat(parts[5]) : undefined;
+    
+    let xOffset = 0;
+    let yOffset = 0;
+    
+    // Handle isTouchAction transformations and invalid inputs
+    if (parts.length > 4 && parts[4] !== '') {
+        if (isTouchAction && parts[4] === 'c') {
+            xOffset = 'COL';
+        } else if (isTouchAction && parts[4] === 'r') {
+            xOffset = 'ROW';
+        } else if (!isNaN(parseFloat(parts[4]))) {
+            xOffset = parseFloat(parts[4]);
+        } else {
+            xOffset = 0;
+        }
+    }
+    
+    if (parts.length > 5 && parts[5] !== '') {
+        if (isTouchAction && parts[5] === 'c') {
+            yOffset = 'COL';
+        } else if (isTouchAction && parts[5] === 'r') {
+            yOffset = 'ROW';
+        } else if (!isNaN(parseFloat(parts[5]))) {
+            yOffset = parseFloat(parts[5]);
+        } else {
+            yOffset = 0;
+        }
+    }
     
     // Create arc object
     const arcObject = {
@@ -290,15 +425,13 @@ function translateRawArc(rawArcString) {
     // Add colour if specified
     if (colour !== undefined && !isNaN(colour)) {
         arcObject.color = colour;
+     } else {
+      arcObject.color = -1;
     }
     
-    // Add offsets if they exist
-    if (xOffset !== undefined) {
-        arcObject.xOffset = xOffset;
-    }
-    if (yOffset !== undefined) {
-        arcObject.yOffset = yOffset;
-    }
+    // Add offsets
+    arcObject.xOffset = xOffset;
+    arcObject.yOffset = yOffset;
     
     // Add arc properties
     arcObject.radius = radius;
@@ -313,7 +446,7 @@ function translateRawArc(rawArcString) {
     return arcObject;
 }
 
-function translateRawText(rawTextString) {
+function translateRawText(rawTextString,isTouchAction=false) {
     // Check if this is a text item
     if (!rawTextString.startsWith('|t')) {
         throw new Error('Invalid text format: must start with |t');
@@ -342,8 +475,35 @@ function translateRawText(rawTextString) {
     // Parse parts: [colour]~text[~colOffset[~rowOffset[~alignment]]]
     const colour = parts[0] === '' ? undefined : parseInt(parts[0]);
     const rawText = parts[1]; // text with HTML tags
-    const xOffset = parts.length > 2 && parts[2] !== '' ? parseFloat(parts[2]) : 0;
-    const yOffset = parts.length > 3 && parts[3] !== '' ? parseFloat(parts[3]) : 0;
+    
+    let xOffset = 0;
+    let yOffset = 0;
+    
+    // Handle isTouchAction transformations and invalid inputs
+    if (parts.length > 2 && parts[2] !== '') {
+        if (isTouchAction && parts[2] === 'c') {
+            xOffset = 'COL';
+        } else if (isTouchAction && parts[2] === 'r') {
+            xOffset = 'ROW';
+        } else if (!isNaN(parseFloat(parts[2]))) {
+            xOffset = parseFloat(parts[2]);
+        } else {
+            xOffset = 0;
+        }
+    }
+    
+    if (parts.length > 3 && parts[3] !== '') {
+        if (isTouchAction && parts[3] === 'c') {
+            yOffset = 'COL';
+        } else if (isTouchAction && parts[3] === 'r') {
+            yOffset = 'ROW';
+        } else if (!isNaN(parseFloat(parts[3]))) {
+            yOffset = parseFloat(parts[3]);
+        } else {
+            yOffset = 0;
+        }
+    }
+    
     const alignment = parts.length > 4 && parts[4] !== '' ? parts[4] : 'center';
     
     // Parse HTML-style formatting tags from text
@@ -395,15 +555,13 @@ function translateRawText(rawTextString) {
     // Add colour if specified
     if (colour !== undefined && !isNaN(colour)) {
         textObject.color = colour;
+     } else {
+      textObject.color = -1;
     }
     
-    // Add offsets if they exist
-    if (xOffset !== undefined) {
-        textObject.xOffset = xOffset;
-    }
-    if (yOffset !== undefined) {
-        textObject.yOffset = yOffset;
-    }
+    // Add offsets
+    textObject.xOffset = xOffset;
+    textObject.yOffset = yOffset;
     
     // Add text content
     textObject.text = textInfo.text;
@@ -431,7 +589,7 @@ function translateRawText(rawTextString) {
     return textObject;
 }
 
-function translateRawValue(rawValueString) {
+function translateRawValue(rawValueString,isTouchAction=false) {
     // Check if this is a value item
     if (!rawValueString.startsWith('|v')) {
         throw new Error('Invalid value format: must start with |v');
@@ -465,12 +623,52 @@ function translateRawValue(rawValueString) {
     const initialParts = backTickParts[0].split('~');
     const colour = initialParts[0] === '' ? undefined : parseInt(initialParts[0]);
     const rawText = initialParts[1]; // text with HTML tags
-    const xOffset = parseFloat(initialParts[2]); // colOffset - required for values
-    const yOffset = parseFloat(initialParts[3]); // rowOffset - required for values
+    
+    let xOffset = 0; // colOffset - required for values
+    let yOffset = 0; // rowOffset - required for values
+    
+    // Handle isTouchAction transformations and invalid inputs for xOffset
+    if (initialParts[2] !== undefined) {
+        if (isTouchAction && initialParts[2] === 'c') {
+            xOffset = 'COL';
+        } else if (isTouchAction && initialParts[2] === 'r') {
+            xOffset = 'ROW';
+        } else if (!isNaN(parseFloat(initialParts[2]))) {
+            xOffset = parseFloat(initialParts[2]);
+        } else {
+            xOffset = 0;
+        }
+    }
+    
+    // Handle isTouchAction transformations and invalid inputs for yOffset
+    if (initialParts[3] !== undefined) {
+        if (isTouchAction && initialParts[3] === 'c') {
+            yOffset = 'COL';
+        } else if (isTouchAction && initialParts[3] === 'r') {
+            yOffset = 'ROW';
+        } else if (!isNaN(parseFloat(initialParts[3]))) {
+            yOffset = parseFloat(initialParts[3]);
+        } else {
+            yOffset = 0;
+        }
+    }
     
     // Parse value and units: value~units
     const valueAndUnits = backTickParts[1].split('~');
-    const intValue = parseInt(valueAndUnits[0]);
+
+    let intValue = 0;
+    if (valueAndUnits[0] !== undefined) {
+        if (isTouchAction && valueAndUnits[0] === 'c') {
+            intValue = 'COL';
+        } else if (isTouchAction && valueAndUnits[0] === 'r') {
+            intValue = 'ROW';
+        } else if (!isNaN(parseFloat(valueAndUnits[0]))) {
+            intValue = parseFloat(valueAndUnits[0]);
+        } else {
+            intValue = 0;
+        }
+    }
+    
     const units = valueAndUnits[1];
     
     // Parse min value
@@ -536,9 +734,11 @@ function translateRawValue(rawValueString) {
     // Add colour if specified
     if (colour !== undefined && !isNaN(colour)) {
         valueObject.color = colour;
+     } else {
+      valueObject.color = -1;
     }
     
-    // Add required offsets
+    // Add offsets
     valueObject.xOffset = xOffset;
     valueObject.yOffset = yOffset;
     
@@ -902,8 +1102,8 @@ function translateRawTouchActionInput(rawTouchActionInputString) {
             italic: false,
             underline: false,
             fontSize: undefined,
-            color: undefined,
-            backgroundColor: undefined
+            color: -1,
+            backgroundColor: 0
         };
         
         // Check for bold tags
@@ -1007,7 +1207,7 @@ function translateRawTouchAction(rawTouchActionString) {
     try {
         // Remove the idx from the primitive if it exists, since touchAction primitives don't use idx
         let cleanPrimitiveRaw = primitiveRaw;        
-        drawingPrimitive = translateRawItem(cleanPrimitiveRaw);
+        drawingPrimitive = translateRawItem(cleanPrimitiveRaw,true); // true if touchAction else default false
                 
     } catch (error) {
         throw new Error(`Failed to parse touchAction primitive: ${error.message}`);
@@ -1023,24 +1223,24 @@ function translateRawTouchAction(rawTouchActionString) {
     return touchActionObject;
 }
 
-function translateRawItem(rawItemString) {
+function translateRawItem(rawItemString, isTouchAction = false) {
     // Determine the item type and call appropriate function
     if (rawItemString.startsWith('|l')) {
-        return translateRawLine(rawItemString);
+        return translateRawLine(rawItemString,isTouchAction);
     } else if (rawItemString.startsWith('|r') || rawItemString.startsWith('|R')) {
-        return translateRawRectangle(rawItemString);
+        return translateRawRectangle(rawItemString,isTouchAction);
     } else if (rawItemString.startsWith('|c') || rawItemString.startsWith('|C')) {
-        return translateRawCircle(rawItemString);
+        return translateRawCircle(rawItemString,isTouchAction);
     } else if (rawItemString.startsWith('|a') || rawItemString.startsWith('|A')) {
-        return translateRawArc(rawItemString);
+        return translateRawArc(rawItemString,isTouchAction);
     } else if (rawItemString.startsWith('|t')) {
-        return translateRawText(rawItemString);
+        return translateRawText(rawItemString,isTouchAction);
     } else if (rawItemString.startsWith('|v')) {
-        return translateRawValue(rawItemString);
+        return translateRawValue(rawItemString,isTouchAction);
     } else if (rawItemString.startsWith('|uh')) {
-        return translateRawUnhide(rawItemString);
+        return translateRawUnhide(rawItemString,isTouchAction);
     } else if (rawItemString.startsWith('|h')) {
-        return translateRawHide(rawItemString);
+        return translateRawHide(rawItemString,isTouchAction);
     } else if (rawItemString.startsWith('|z')) {
         return translateRawZero(rawItemString);
     } else if (rawItemString.startsWith('|xc') || rawItemString.startsWith('|x')) {

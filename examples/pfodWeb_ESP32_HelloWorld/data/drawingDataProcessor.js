@@ -20,8 +20,32 @@ const TouchZoneFilters = {
     PRESS: 16,          // Long press - queued if pfodApp busy waiting for response
     ENTRY: 32,          // NEVER sent to pfodApp
     EXIT: 64,           // NEVER sent to pfodApp
-    DOWN_UP: 256,       // Msg not sent until finger removed (UP) but updates touchAction
+    DOWN_DRAG_UP: 256,       // Msg not sent until finger removed (UP) but updates touchAction alias for DOWN_UP
     TOUCH_DISABLED: 512 // Capture touch to prevent scroll but do not send msg
+};
+
+// Decode method to convert filter numbers to array of filter names
+TouchZoneFilters.decode = function(filterNumber) {
+    // Handle TOUCH (value 0) first
+    if (filterNumber === 0) {
+        return ['TOUCH'];
+    }
+    
+    // TOUCH_DISABLED has special handling - only return itself, no other values
+    if (filterNumber === 512) {
+        return ['TOUCH_DISABLED'];
+    }
+    
+    const result = [];
+    
+    // Check each filter value (excluding TOUCH and TOUCH_DISABLED which are handled above)
+    for (const [name, value] of Object.entries(TouchZoneFilters)) {
+        if (name !== 'decode' && value !== 0 && value !== 512 && (filterNumber & value) === value) {
+            result.push(name);
+        }
+    }
+    
+    return result;
 };
 
 // make all cmd: array
@@ -57,6 +81,7 @@ class DrawingDataProcessor {
           }
           if (this.isEmptyCmd(cmd)) {
             console.log(`[DRAWING_DATA] Received empty cmd response - no action needed (requestType: ${requestType})`);
+            // need to restore from touchaction
             return; // Successfully handled - no drawing data to process
           }            
           let msgType = cmd[0]; // take top on
@@ -170,7 +195,7 @@ class DrawingDataProcessor {
                 console.log(`[COLOR_CONVERSION] Converting string color "${colorValue}" to number ${parseInt(colorValue)}`);
                 colorValue = isNaN(parseInt(colorValue))? 0 : parseInt(colorValue);
             }
-            const validColor = (typeof colorValue === 'number' && colorValue >= 0 && colorValue <= 255) ? colorValue : 0;
+            const validColor = (typeof colorValue === 'number' && ((colorValue >= 0 && colorValue <= 255) || colorValue === -1)) ? colorValue : 0;
             console.log(`[COLOR_VALIDATION] Original color: ${data.color} (${typeof data.color}) -> Final color: ${validColor}`);
 
             const drawingData = {
@@ -358,8 +383,8 @@ class DrawingDataProcessor {
                   colorValue = isNaN(parseInt(colorValue))? 0 : parseInt(colorValue);
                 }                                   
                
-                if (typeof colorValue === 'number' && colorValue >= 0 && colorValue <= 255) {
-                    item.color = Math.floor(colorValue); // Ensure integer
+                if (typeof colorValue === 'number' && ((colorValue >= 0 && colorValue <= 255) || colorValue === -1)) {
+                    item.color = Math.floor(colorValue); // Ensure integer (-1 for Black/White mode, 0-255 for regular colors)
                 } else {
                     item.color = 0; // Default to black for invalid colors
                 }
@@ -452,7 +477,7 @@ class DrawingDataProcessor {
                 item.ySize = item.ySize !== undefined ? item.ySize : 1;
                 console.log('Processed line with defaults:', JSON.stringify(item));
                 
-            } else if (item.type === 'insertDwg' || item.type.toLowerCase() === 'insertdwg') {
+            } else if (item.type === 'insertDwg' ) { //|| item.type.toLowerCase() === 'insertdwg') {
                 // Always ensure insertDwg items have null index - they should NEVER be indexed
                 if (item.idx && item.idx !== 'null') {
                     console.warn(`Warning: insertDwg item for "${item.drawingName}" has idx=${item.idx}, nulling it as insertDwg should never be indexed`);
@@ -634,7 +659,7 @@ class DrawingDataProcessor {
               this.pfodWeb.drawingManager.ensureItemCollections(itemDrawingName);                       
 
               // Special handling for insertDwg items
-              if (item.type === 'insertDwg' || (item.type && item.type.toLowerCase() === 'insertdwg')) {
+              if (item.type === 'insertDwg') { // || (item.type && item.type.toLowerCase() === 'insertdwg')) {
                     // For insertDwg items, we MUST use the current drawing name
                     // NOT the drawingName specified in the item (which is the target drawing to insert)
                     const currentDrawing = data.name;
@@ -699,6 +724,11 @@ class DrawingDataProcessor {
                   const currentIndexedItems = this.pfodWeb.drawingManager.getIndexedItems(itemDrawingName);
                   const isUpdate = currentIndexedItems[idx] !== undefined;                                                
                   // Add the item to the drawing's indexed items using the manager
+                  if (isUpdate) {
+                   item.transform = currentIndexedItems[idx].transform;// || { x: 0, y: 0, scale: 1 };
+                   item.clipRegion = currentIndexedItems[idx].clipRegion;// || { x: 0, y: 0, width: 100, height: 20 };
+                  }
+
                   this.pfodWeb.drawingManager.indexedItems[itemDrawingName][idx] = item;
                         
                   console.log(`${isUpdate ? 'Updated' : 'Added'} indexed item: type=${item.type}, drawing=${itemDrawingName}, idx=${idx}, visible=${item.visible !== false}`);
@@ -740,10 +770,10 @@ class DrawingDataProcessor {
     console.log(`Scanning for insertDwg items in ${dwgUnindexedItems.length} unindexed items of drawing ${data.name}`);    
     // Debug: full dump of unindexed items array for this drawing
     console.log(`[DEBUG] Raw unindexed items array for ${data.name}:`, JSON.stringify(dwgUnindexedItems));    
-    // Find insertDwg items in unindexed items - handle both camelCase and lowercase
+    // Find insertDwg items in unindexed items 
     const insertDwgItems = dwgUnindexedItems.filter(item => 
         item.type && (
-            item.type.toLowerCase() === 'insertdwg' || 
+            //item.type.toLowerCase() === 'insertdwg' || 
             item.type === 'insertDwg'
         ));
 
