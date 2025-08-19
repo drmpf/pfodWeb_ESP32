@@ -87,7 +87,7 @@
 <body> 
     <div id="message-overlay">
         <h1 class="title">pfodWeb</h1>
-        <p>V1.0.1 -- 26th July 2025</p>
+        <p id="version-display">Loading version...</p>
         <p>(c)2025 <a href="https://www.forward.com.au/pfod/pfodWeb" target="_blank">https://www.forward.com.au/pfod/pfodWeb</a>
         <h1> </h1>
         <p>Use:</p>
@@ -96,7 +96,11 @@
         <div class="example"><a href="http://localhost/pfodWebDebug" id="pfodDebug-link">http://<span id="server-addressDebug">localhost</span>/pfodWebDebug</a></div>
     </div>
 
+    <script src="version.js"></script>
     <script>
+        // Update version display
+        document.getElementById('version-display').textContent = JS_VERSION;
+        
         const hostname = window.location.hostname;
         const port = window.location.port;
         const serverAddress = port ? `${hostname}:${port}` : hostname;

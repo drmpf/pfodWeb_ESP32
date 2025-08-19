@@ -11,7 +11,7 @@
  * provided this copyright is maintained.
  */
 
-void ESP32_start_pfodWebServer(const char* version); // call this from startup()
+void ESP32_start_pfodWebServer(const char* version, const char* _pfodWebServerURL = NULL); 
 void ESP32_handle_pfodWebServer();  // call this each loop()
-void pfodWeb_setVersion(const char* version);
+void pfodWeb_setVersion(const char* version); // this is called from ESP32_start_pfodWebServer()
 #endif

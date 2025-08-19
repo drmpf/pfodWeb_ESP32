@@ -29,6 +29,8 @@ class MergeAndRedraw {
             unindexedItems: {},
             indexedItems: {},
             touchZonesByCmd: {},
+            touchActionsByCmd: {},
+            touchActionInputsByCmd: {},
             allTouchZonesByCmd: {},
             drawingResponseStatus: {},
             // Merged items for reference during drawing/clipping - moved here for consistency
@@ -75,6 +77,26 @@ class MergeAndRedraw {
         return this.drawingManagerState.allTouchZonesByCmd || {};
     }
 
+    // Get merged touchActions for mouse operations
+    getAllTouchActionsByCmd() {
+        return this.drawingManagerState.allTouchActionsByCmd || {};
+    }
+
+    // Get merged touchActionInputs for mouse operations 
+    getAllTouchActionInputsByCmd() {
+        return this.drawingManagerState.allTouchActionInputsByCmd || {};
+    }
+
+    // Get global display transform for merged canvas
+    getGlobalTransform() {
+        return this.drawingManagerState.globalTransform || { x: 0, y: 0, scale: 1.0 };
+    }
+
+    // Set global display transform for merged canvas
+    setGlobalTransform(transform) {
+        this.drawingManagerState.globalTransform = { ...transform };
+    }
+
     // Get merged unindexed items for mouse operations
     getAllUnindexedItems() {
         return this.drawingManagerState.allUnindexedItems || [];
@@ -112,6 +134,7 @@ class MergeAndRedraw {
         if (config.indexedItems) this.drawingManagerState.indexedItems = config.indexedItems;
         if (config.touchZonesByCmd) this.drawingManagerState.touchZonesByCmd = config.touchZonesByCmd;
         if (config.touchActionsByCmd) this.drawingManagerState.touchActionsByCmd = config.touchActionsByCmd;
+        if (config.touchActionInputsByCmd) this.drawingManagerState.touchActionInputsByCmd = config.touchActionInputsByCmd;
         if (config.allTouchZonesByCmd) this.drawingManagerState.allTouchZonesByCmd = config.allTouchZonesByCmd;
         if (config.drawingResponseStatus) this.drawingManagerState.drawingResponseStatus = config.drawingResponseStatus;
         
@@ -446,28 +469,40 @@ class MergeAndRedraw {
            }
         }
         
-        // Process touchActions - merge them into the main drawing's touchActions
+        // Process touchActions - merge them into global collection
         for (const cmd in touchActionItems) {
             const touchActions = touchActionItems[cmd];
             if (touchActions && touchActions.length > 0) {
                 console.log(`[MERGE_DWG] Found ${touchActions.length} touchActions for cmd="${cmd}" in drawing "${drawingName}"`);
                 
-                // We need to add these touchActions to the main drawing's touchActionsByCmd
-                // The merge process should make nested drawing touchActions available to the main drawing
-                const mainDrawingName = insertDwg.parentDrawingName;
-                if (!this.drawingManagerState.touchActionsByCmd[mainDrawingName]) {
-                    this.drawingManagerState.touchActionsByCmd[mainDrawingName] = {};
-                }
-                if (!this.drawingManagerState.touchActionsByCmd[mainDrawingName][cmd]) {
-                    this.drawingManagerState.touchActionsByCmd[mainDrawingName][cmd] = [];
+                // Initialize global collection if needed
+                if (!this.drawingManagerState.allTouchActionsByCmd) {
+                    this.drawingManagerState.allTouchActionsByCmd = {};
                 }
                 
-                // Copy touchActions from nested drawing to main drawing
-                this.drawingManagerState.touchActionsByCmd[mainDrawingName][cmd] = [...touchActions];
-                console.log(`[MERGE_DWG] Merged ${touchActions.length} touchActions for cmd="${cmd}" from "${drawingName}" into main drawing "${mainDrawingName}"`);
+                // Add to global merged collection (overwrites any existing with same cmd)
+                this.drawingManagerState.allTouchActionsByCmd[cmd] = [...touchActions];
+                console.log(`[MERGE_DWG] Added ${touchActions.length} touchActions for cmd="${cmd}" to global merged collection`);
             }
         }
         
+        // Process touchActionInputs - merge them into global collection
+        const touchActionInputItems = this.drawingManagerState.touchActionInputsByCmd[drawingName] || {};
+        for (const cmd in touchActionInputItems) {
+            const touchActionInput = touchActionInputItems[cmd];
+            if (touchActionInput) {
+                console.log(`[MERGE_DWG] Found touchActionInput for cmd="${cmd}" in drawing "${drawingName}"`);
+                
+                // Initialize global collection if needed
+                if (!this.drawingManagerState.allTouchActionInputsByCmd) {
+                    this.drawingManagerState.allTouchActionInputsByCmd = {};
+                }
+                
+                // Add to global merged collection (overwrites any existing with same cmd)
+                this.drawingManagerState.allTouchActionInputsByCmd[cmd] = { ...touchActionInput };
+                console.log(`[MERGE_DWG] Added touchActionInput for cmd="${cmd}" to global merged collection`);
+            }
+        }
         
         // Process unindexed items
         for (let i = 0; i < drawingUnindexedItems.length; i++) {
@@ -480,6 +515,12 @@ class MergeAndRedraw {
             //console.log(`[SCALE_MERGE_DWG]  parent transform: (${parentTransform.x}, ${parentTransform.y}, ${parentTransform.scale})`);
             
             if (item.type && item.type === 'insertDwg') {
+                // Check if insertDwg should be visible
+                if (item.visible === false) {
+                    console.log(`[MERGE_DWG] Skipping hidden insertDwg for drawing "${item.drawingName}"`);
+                    continue;
+                }
+                
                 // Handle nested insertDwg
                 const nestedDrawingName = item.drawingName;
                 console.log(`[MERGE_DWG] Found nested insertDwg item for drawing "${nestedDrawingName}" at offsets (${item.xOffset || 0}, ${item.yOffset || 0})`);
