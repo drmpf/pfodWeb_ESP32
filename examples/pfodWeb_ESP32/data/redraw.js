@@ -55,35 +55,13 @@ function getBlackWhite(color) {
         return [r, g, b];
     }
     
-    // Calculate relative luminance
-    function getLuminance(r, g, b) {
-        const [rs, gs, bs] = [r, g, b].map(c => {
-            c = c / 255;
-            return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
-        });
-        return 0.2126 * rs + 0.7152 * gs + 0.0722 * bs;
-    }
-    
-    // Calculate contrast ratio between two colors
-    function getContrastRatio(lum1, lum2) {
-        const lighter = Math.max(lum1, lum2);
-        const darker = Math.min(lum1, lum2);
-        return (lighter + 0.05) / (darker + 0.05);
-    }
-    
     const [r, g, b] = getRGB(color);
-    const colorLuminance = getLuminance(r, g, b);
     
-    // Luminance values for pure black and white
-    const blackLuminance = 0;
-    const whiteLuminance = 1;
+    // Use the same algorithm as Java code: y = (299 * R + 587 * G + 114 * B) / 1000
+    const y = (299 * r + 587 * g + 114 * b) / 1000;
     
-    // Calculate contrast ratios
-    const contrastWithBlack = getContrastRatio(colorLuminance, blackLuminance);
-    const contrastWithWhite = getContrastRatio(colorLuminance, whiteLuminance);
-    
-    // Return the color number with higher contrast
-    return contrastWithBlack > contrastWithWhite ? 0 : 15; // BLACK (0) : WHITE (15)
+    // If y >= 128, background is light, use black text. Otherwise use white text.
+    return y >= 128 ? 0 : 15; // BLACK (0) : WHITE (15)
 }
 
 // Convert xterm 256 color index to RGB hex color
@@ -619,27 +597,39 @@ class Redraw {
             textX = canvasX; // xOffset position is where left edge will be
         }
 
-        // Draw the text at the calculated position
-        this.ctx.fillText(text, textX, canvasY);
+        // Split text by newlines and draw each line separately
+        const lines = text.split('\n');
+        const lineHeight = canvasFontSize * 1.0; // 1.0x font size for line spacing
+        
+        // Calculate starting Y position for multi-line text (center the block vertically)
+        const totalHeight = (lines.length - 1) * lineHeight;
+        let startY = canvasY - (totalHeight / 2);
+        
+        lines.forEach((line, index) => {
+            const lineY = startY + (index * lineHeight);
+            
+            // Draw the line at the calculated position
+            this.ctx.fillText(line, textX, lineY);
 
-        // Draw underline if specified
-        if (underline) {
-            const textMetrics = this.ctx.measureText(text);
-            const underlineY = canvasY + canvasFontSize / 2;
-            let underlineX = textX;
-            let underlineWidth = textMetrics.width;
+            // Draw underline for this line if specified
+            if (underline) {
+                const textMetrics = this.ctx.measureText(line);
+                const underlineY = lineY + canvasFontSize / 2;
+                let underlineX = textX;
+                let underlineWidth = textMetrics.width;
 
-            if (align === 'center') {
-                underlineX = textX - textMetrics.width / 2;
-            } else if (align === 'right') {
-                underlineX = textX - textMetrics.width;
+                if (align === 'center') {
+                    underlineX = textX - textMetrics.width / 2;
+                } else if (align === 'right') {
+                    underlineX = textX - textMetrics.width;
+                }
+
+                this.ctx.beginPath();
+                this.ctx.moveTo(underlineX, underlineY);
+                this.ctx.lineTo(underlineX + underlineWidth, underlineY);
+                this.ctx.stroke();
             }
-
-            this.ctx.beginPath();
-            this.ctx.moveTo(underlineX, underlineY);
-            this.ctx.lineTo(underlineX + underlineWidth, underlineY);
-            this.ctx.stroke();
-        }
+        });
 
         console.log(`[DRAWING_LABEL] Label drawn: "${text}" at (${canvasX}, ${canvasY})`);
     }
@@ -725,27 +715,39 @@ class Redraw {
             textX = canvasX; // xOffset position is where left edge will be
         }
 
-        // Draw the text at the calculated position
-        this.ctx.fillText(displayText, textX, canvasY);
+        // Split text by newlines and draw each line separately
+        const lines = displayText.split('\n');
+        const lineHeight = canvasFontSize * 1.0; // 1.0x font size for line spacing
+        
+        // Calculate starting Y position for multi-line text (center the block vertically)
+        const totalHeight = (lines.length - 1) * lineHeight;
+        let startY = canvasY - (totalHeight / 2);
+        
+        lines.forEach((line, index) => {
+            const lineY = startY + (index * lineHeight);
+            
+            // Draw the line at the calculated position
+            this.ctx.fillText(line, textX, lineY);
 
-        // Draw underline if specified
-        if (underline) {
-            const textMetrics = this.ctx.measureText(displayText);
-            const underlineY = canvasY + canvasFontSize / 2;
-            let underlineX = textX;
-            let underlineWidth = textMetrics.width;
+            // Draw underline for this line if specified
+            if (underline) {
+                const textMetrics = this.ctx.measureText(line);
+                const underlineY = lineY + canvasFontSize / 2;
+                let underlineX = textX;
+                let underlineWidth = textMetrics.width;
 
-            if (align === 'center') {
-                underlineX = textX - textMetrics.width / 2;
-            } else if (align === 'right') {
-                underlineX = textX - textMetrics.width;
+                if (align === 'center') {
+                    underlineX = textX - textMetrics.width / 2;
+                } else if (align === 'right') {
+                    underlineX = textX - textMetrics.width;
+                }
+
+                this.ctx.beginPath();
+                this.ctx.moveTo(underlineX, underlineY);
+                this.ctx.lineTo(underlineX + underlineWidth, underlineY);
+                this.ctx.stroke();
             }
-
-            this.ctx.beginPath();
-            this.ctx.moveTo(underlineX, underlineY);
-            this.ctx.lineTo(underlineX + underlineWidth, underlineY);
-            this.ctx.stroke();
-        }
+        });
 
         console.log(`[DRAWING_VALUE] Value drawn: "${displayText}" at (${canvasX}, ${canvasY})`);
     }

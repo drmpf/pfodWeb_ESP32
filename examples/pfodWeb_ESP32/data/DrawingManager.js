@@ -183,15 +183,19 @@ class DrawingManager {
             return this;
         }
  
-        // Apply current transform if not already set
-   //     if (!touchZone.transform) {
-   //         console.warn(`Error missing transform from touchzone in drawing "${drawingName}" ${JSON.stringify(touchZone)}`);
-   //         return this;
-   //     }
+        // Check if there's already an existing item (could be index item) with this cmd
+        const existingItem = this.touchZonesByCmd[drawingName] && this.touchZonesByCmd[drawingName][cmd];
         
-                // Apply current transform to the item
-        if (!touchZone.transform) {
-            touchZone.transform = {...this.getTransform(drawingName)};
+        if (existingItem) {
+            // Preserve transform and visibility state from existing item (likely an index item)
+            touchZone.transform = existingItem.transform;
+            touchZone.visible = existingItem.visible !== undefined ? existingItem.visible : touchZone.visible;
+            console.log(`[DRAWING_MANAGER] Preserving state from existing item for cmd="${cmd}": visible=${touchZone.visible}, transform=(${touchZone.transform.x},${touchZone.transform.y},${touchZone.transform.scale})`);
+        } else {
+            // Apply current transform if not already set
+            if (!touchZone.transform) {
+                touchZone.transform = {...this.getTransform(drawingName)};
+            }
         }
         
         // Add to the touchZones map - cmd is unique reference
@@ -386,9 +390,9 @@ class DrawingManager {
     }
     
     // Remove touchZone and associated touchActions by cmd, and also erase insertDwg items
-    eraseByCmd(drawingName, cmd) {
+    eraseByCmd(drawingName, cmd, dwgName = null) {
         console.log(`[DRAWING_MANAGER] Erasing touchZone and associated actions for cmd="${cmd}" in drawing="${drawingName}"`);
-        
+        if (!dwgName) {
         // Remove touchZone
         if (this.touchZonesByCmd[drawingName] && this.touchZonesByCmd[drawingName][cmd]) {
             delete this.touchZonesByCmd[drawingName][cmd];
@@ -406,9 +410,10 @@ class DrawingManager {
             delete this.touchActionInputsByCmd[drawingName][cmd];
             console.log(`[DRAWING_MANAGER] Removed touchActionInput for cmd="${cmd}"`);
         }
-        
-        // Also erase any insertDwg items with drawingName matching the cmd
-        this.eraseInsertDwgByCmd(drawingName, cmd);
+        } else {
+          // Also erase any insertDwg items with drawingName matching the cmd
+          this.eraseInsertDwgByCmd(drawingName, cmd);
+        }
         
         return this;
     }
@@ -464,48 +469,53 @@ class DrawingManager {
     }
     
     // Hide touchZone and insertDwg items by cmd
-    hideByCmd(drawingName, cmd) {
+    hideByCmd(drawingName, cmd, dwgName = null) {
         console.log(`[DRAWING_MANAGER] Hiding items with cmd="${cmd}" in drawing="${drawingName}"`);
-        
+        if (!dwgName) {
         // Hide touchZone
         if (this.touchZonesByCmd[drawingName] && this.touchZonesByCmd[drawingName][cmd]) {
             this.touchZonesByCmd[drawingName][cmd].visible = false;
             console.log(`[DRAWING_MANAGER] Hidden touchZone for cmd="${cmd}"`);
         }
-        
-        // Hide insertDwg items with drawingName matching cmd
+        } else {
+        // Hide insertDwg items with cmd matching the hide command
         if (this.unindexedItems[drawingName]) {
-            this.unindexedItems[drawingName].forEach(item => {
-                if (item.type === 'insertDwg' && item.drawingName === cmd) {
-                    item.visible = false;
-                    console.log(`[DRAWING_MANAGER] Hidden insertDwg item for "${cmd}"`);
+            console.log(`[DRAWING_MANAGER] Checking ${this.unindexedItems[drawingName].length} unindexed items for insertDwg to hide with cmd="${cmd}"`);
+            this.unindexedItems[drawingName].forEach((item, index) => {
+                if (item.type === 'insertDwg') {
+                    console.log(`[DRAWING_MANAGER] Found insertDwg item ${index}: cmd="${item.cmd}", target cmd="${cmd}", match=${item.cmd === cmd}`);
+                    if (item.cmd === cmd) {
+                        item.visible = false;
+                        console.log(`[DRAWING_MANAGER] Hidden insertDwg item with cmd="${cmd}"`);
+                    }
                 }
             });
+        }
         }
         
         return this;
     }
     
     // Unhide touchZone and insertDwg items by cmd
-    unhideByCmd(drawingName, cmd) {
+    unhideByCmd(drawingName, cmd, dwgName = null) {
         console.log(`[DRAWING_MANAGER] Unhiding items with cmd="${cmd}" in drawing="${drawingName}"`);
-        
+        if (!dwgName) {
         // Unhide touchZone
         if (this.touchZonesByCmd[drawingName] && this.touchZonesByCmd[drawingName][cmd]) {
             this.touchZonesByCmd[drawingName][cmd].visible = true;
             console.log(`[DRAWING_MANAGER] Unhidden touchZone for cmd="${cmd}"`);
         }
-        
-        // Unhide insertDwg items with drawingName matching cmd
+        } else {
+        // Unhide insertDwg items with cmd matching the unhide command
         if (this.unindexedItems[drawingName]) {
             this.unindexedItems[drawingName].forEach(item => {
-                if (item.type === 'insertDwg' && item.drawingName === cmd) {
+                if (item.type === 'insertDwg' && item.cmd === cmd) {
                     item.visible = true;
-                    console.log(`[DRAWING_MANAGER] Unhidden insertDwg item for "${cmd}"`);
+                    console.log(`[DRAWING_MANAGER] Unhidden insertDwg item with cmd="${cmd}"`);
                 }
             });
         }
-        
+        }
         return this;
     }
     

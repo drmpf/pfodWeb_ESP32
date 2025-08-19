@@ -18,10 +18,12 @@ extern void handle_pfodMainMenu(pfodParser & parser);
 // or just used debugPtr = &Serial
 static Print* debugPtr = NULL;  // local to this file
 
+#include <WiFi.h>
 #include <NetworkClient.h>
 #include <WebServer.h>
 #include "ESP32_LittleFSsupport.h"
 #include "pfodStreamString.h" // string class to capture parser json output 
+
 
 // comment out this line to force reload every time for testing
 // otherwise only reloads every 24hrs
@@ -45,6 +47,8 @@ static bool sendHeaderAndTail(String & header, const char*tailPath);
 
 static bool serverStarted = false;
 
+static String pfodWebServerURL;
+
 void pfodWeb_setVersion(const char* version) {
   webParser.setVersion(version);
 }
@@ -52,12 +56,25 @@ void pfodWeb_setVersion(const char* version) {
 // Create a StringPrint object to capture JSON output
 pfodStreamString jsonCapture;
 
+void handleCORS() {
+  // Handle preflight OPTIONS requests
+  server.sendHeader("Access-Control-Allow-Origin", "*");
+  server.sendHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  server.sendHeader("Access-Control-Allow-Headers", "x-requested-with, Content-Type");
+  server.sendHeader("Access-Control-Max-Age", "86400");
+  server.send(200, "text/plain", "");
+}
 
 //NOTE esp32 server automatically applies urlDecode to args before using names/values
 static void handle_pfodWeb_page(bool _debug) {
   if (debugPtr) {
     debugPtr->print("Handling request with "); debugPtr->println(_debug ? "debug true" : "debug false");
   }
+  // Add CORS headers to all responses
+  server.sendHeader("Access-Control-Allow-Origin", "*");
+  server.sendHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  server.sendHeader("Access-Control-Allow-Headers", "x-requested-with, Content-Type");
+  
 
   bool isAjaxJsonRequest = false;
   String cmdStr = server.arg("cmd");
@@ -145,29 +162,42 @@ static void handle_pfodWeb() {
     debugPtr->println("Handling /pfodWeb request");
     printRequestArgs(debugPtr);
   }
-  handle_pfodWeb_page(false);
+  handle_pfodWeb_page(false); // adds CORS
 }
 
-void ESP32_start_pfodWebServer(const char* version) {
+void ESP32_start_pfodWebServer(const char* version, const char* _pfodWebServerURL) {
   if (serverStarted) {
     return;
   }
   pfodWeb_setVersion(version);
-  if (!initializeFS()) {
-    Serial.println("LittleFS failed to start.");
-    return;
+  if (_pfodWebServerURL) {
+    pfodWebServerURL = _pfodWebServerURL;
+    pfodWebServerURL.trim();
   }
-  showLittleFS_size(&Serial); // send to Serial to prevent itermixing with buffered debug
-  Serial.println(" LittleFS File list:");
-  listDir("/", &Serial);
-
-
+  if (!pfodWebServerURL.length()) { // empty url start LittleFS to server pages and .js
+    if (!initializeFS()) {
+      Serial.println("LittleFS failed to start.");
+      return;
+    }
+    showLittleFS_size(&Serial); // send to Serial to prevent itermixing with buffered debug
+    Serial.println(" LittleFS File list:");
+    listDir("/", &Serial);
+  } else {
+    Serial.print(" Using pfodWebServer: "); Serial.print(pfodWebServerURL); Serial.println(" -- LittleFS not started here.");
+  }
+  
   server.on("/", HTTP_GET, handleIndex);
   server.on("/index.html", handleIndex); // both GET and POST, to handle redirect after set time
+  
+  // only add cors to pfodWeb paths and fileNoFound
+  server.on("/pfodWeb", HTTP_OPTIONS, handleCORS);
   server.on("/pfodWeb", HTTP_GET, handle_pfodWeb);
+  server.on("/pfodWebDebug", HTTP_OPTIONS, handleCORS);
   server.on("/pfodWebDebug", HTTP_GET, handle_pfodWebDebug);
 
+    // Handle 404s with CORS
   server.onNotFound(handleNotFound);
+
   (void)(returnOK); // to suppress compiler warning only
   (void)(returnFail); // to suppress compiler warning only
   (void)(redirect);  // to suppress compiler warning only
@@ -236,7 +266,9 @@ static void handleNotFound() {
     debugPtr->print("File Not found: ");    debugPtr->println(server.uri());
     printRequestArgs(debugPtr);
   }
-  String message = "LittleFS \n\n";
+ // Add CORS headers even to 404 responses
+  server.sendHeader("Access-Control-Allow-Origin", "*");  
+ String message = "LittleFS \n\n";
   message += "URI: ";
   message += server.uri();
   message += "\nMethod: ";
@@ -283,8 +315,15 @@ static bool sendHeaderAndTail(String & header, const char*tailPath) {
 
 
 static void handleIndex() {
-  String newHeader = "";
-  sendHeaderAndTail(newHeader, "/index.html");
+  if (pfodWebServerURL.length()) {
+    String url = pfodWebServerURL;
+    url += "/?ip=";
+    url += WiFi.localIP().toString();
+    redirect(url.c_str());
+  } else {  
+    String newHeader = "";
+    sendHeaderAndTail(newHeader, "/localIndex.html");
+  }  
 }
 
 
@@ -295,7 +334,7 @@ static bool loadFromFile(String path) {
   }
   String dataType = "text/plain";
   if (path.endsWith("/")) {
-    path += "index.html";
+    path += "localIndex.html";
   }
 
   if (path.endsWith(".html")) {

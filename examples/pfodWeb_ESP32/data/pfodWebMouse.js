@@ -89,25 +89,15 @@ window.pfodWebMouse = {
     this.touchState.hasEnteredZones.clear();
 
     
-      // Make a complete backup copy of ALL drawing state including touchZones, touchActions, and touchActionInputs
-      const unindexedBackup = JSON.parse(JSON.stringify(this.drawingManager.getUnindexedItems(drawingName)));
-      const indexedBackup = JSON.parse(JSON.stringify(this.drawingManager.getIndexedItems(drawingName)));
-      const transformBackup = JSON.parse(JSON.stringify(this.drawingManager.getTransform(drawingName)));
+      // Make backup copy of ONLY merged/display data that will be modified by touchActions
+      const transformBackup = JSON.parse(JSON.stringify(this.mergeAndRedraw.getGlobalTransform()));
       
-      // Backup touchZones from both per-drawing and merged collections
-      const touchZonesByCmd = this.drawingManager.getTouchZonesByCmd(drawingName);
-      const touchZonesBackup = JSON.parse(JSON.stringify(touchZonesByCmd));
+      // Backup merged collections that will be restored
       const allTouchZonesBackup = JSON.parse(JSON.stringify(this.mergeAndRedraw.getAllTouchZonesByCmd()));
-      
-      // Backup merged items from drawingManagerState
       const allUnindexedItemsBackup = JSON.parse(JSON.stringify(this.mergeAndRedraw.getAllUnindexedItems()));
       const allIndexedItemsByNumberBackup = JSON.parse(JSON.stringify(this.mergeAndRedraw.getAllIndexedItemsByNumber()));
-      
-      // Backup touchActions and touchActionInputs (using correct property names)
-      const touchActionsBackup = (this.drawingManager.touchActionsByCmd && this.drawingManager.touchActionsByCmd[drawingName]) ? 
-        JSON.parse(JSON.stringify(this.drawingManager.touchActionsByCmd[drawingName])) : {};
-      const touchActionInputsBackup = (this.drawingManager.touchActionInputsByCmd && this.drawingManager.touchActionInputsByCmd[drawingName]) ? 
-        JSON.parse(JSON.stringify(this.drawingManager.touchActionInputsByCmd[drawingName])) : {};
+      const touchActionsBackup = JSON.parse(JSON.stringify(this.mergeAndRedraw.getAllTouchActionsByCmd()));
+      const touchActionInputsBackup = JSON.parse(JSON.stringify(this.mergeAndRedraw.getAllTouchActionInputsByCmd()));
 
       // Get current clip area from drawing data
       const drawingData = this.drawingManager.getDrawingData(drawingName);
@@ -118,18 +108,15 @@ window.pfodWebMouse = {
         height: drawingData.data ? drawingData.data.y : 0
       } : null;
 
-      console.warn(`[TOUCH_ACTION] Creating INITIAL backup: ${unindexedBackup.length} unindexed items, ${Object.keys(indexedBackup).length} indexed items, ${Object.keys(touchZonesBackup).length} touchZones, ${Object.keys(allTouchZonesBackup).length} merged touchZones, ${allUnindexedItemsBackup.length} merged unindexed items, ${Object.keys(allIndexedItemsByNumberBackup).length} merged indexed items, ${Object.keys(touchActionsBackup).length} touchActions, ${Object.keys(touchActionInputsBackup).length} touchActionInputs, transform (${transformBackup.x}, ${transformBackup.y}, ${transformBackup.scale}), and clip area`);
+      console.warn(`[TOUCH_ACTION] Creating INITIAL backup: ${Object.keys(allTouchZonesBackup).length} merged touchZones, ${allUnindexedItemsBackup.length} merged unindexed items, ${Object.keys(allIndexedItemsByNumberBackup).length} merged indexed items, ${Object.keys(touchActionsBackup).length} touchActions, ${Object.keys(touchActionInputsBackup).length} touchActionInputs, transform (${transformBackup.x}, ${transformBackup.y}, ${transformBackup.scale}), and clip area`);
     // copy current dwg state
       // Store the complete backup for restoration when mouse is released
       console.log(`[TOUCH_ACTION] DEBUG - Creating backup on object:`, this);
       console.log(`[TOUCH_ACTION] DEBUG - Object constructor:`, this.constructor?.name);
       // Store backup on the global pfodWebMouse object so it's accessible from restoration calls
       window.pfodWebMouse.touchActionBackups = {
-        unindexed: unindexedBackup,
-        indexed: indexedBackup,
         transform: transformBackup,
         clipArea: clipAreaBackup,
-        touchZonesByCmd: touchZonesBackup,
         allTouchZonesByCmd: allTouchZonesBackup,
         allUnindexedItems: allUnindexedItemsBackup,
         allIndexedItemsByNumber: allIndexedItemsByNumberBackup,
@@ -764,7 +751,8 @@ window.pfodWebMouse = {
     const drawingName = this.drawingManager.currentDrawingName; //touchZone.drawingName || 
 
     // Check for touchActionInput first - it runs before other touchActions
-    const touchActionInput = this.drawingManager.getTouchActionInput(drawingName, touchZone.cmd);
+    const allTouchActionInputsByCmd = this.mergeAndRedraw.getAllTouchActionInputsByCmd();
+    const touchActionInput = allTouchActionInputsByCmd[touchZone.cmd];
     if (touchActionInput) {
       console.log(`[TOUCH_ACTION_INPUT] Found touchActionInput for cmd=${touchZone.cmd}`);
       window.pfodWebMouse.executeTouchActionInput.call(this, drawingName, touchZone.cmd, touchActionInput, col, row, touchType);
@@ -803,7 +791,7 @@ window.pfodWebMouse = {
         console.log(`[TOUCH_ACTION_QUEUE] No version added - savedVersion: "${savedVersion}" (null)`);
       }
 
-      // Set up request options
+      // Set up request options - will be corrected by addToRequestQueue for cross-origin
       const options = {
         headers: {
           'Accept': 'application/json',
@@ -829,8 +817,9 @@ window.pfodWebMouse = {
     // REQUIREMENT: Always start from basic (untouched) drawing
     // Only make backup once - don't restore during drag operations
 
-    // Get the touchAction for this cmd
-    const touchActions = this.drawingManager.getTouchAction(drawingName, cmd);
+    // Get the touchAction for this cmd from merged data
+    const allTouchActionsByCmd = this.mergeAndRedraw.getAllTouchActionsByCmd();
+    const touchActions = allTouchActionsByCmd[cmd];
 
     if (!touchActions || touchActions.length === 0) {
       console.log(`[TOUCH_ACTION] No touchAction found for cmd=${cmd}, drawing=${drawingName}`);
@@ -852,7 +841,7 @@ window.pfodWebMouse = {
         const item = JSON.parse(JSON.stringify(actionItem));
         
         if (item.idx !== undefined) {
-          const backupIndexedItem = backup.indexed[item.idx];
+          const backupIndexedItem = backup.allIndexedItemsByNumber[item.idx];
           if (!backupIndexedItem) {
             console.error(`[TOUCH_ACTION] Processing touchAction but no dwg item for this index`, JSON.stringify(item,null,2));
             return null; // Return null for invalid items, they'll be filtered out
@@ -920,11 +909,9 @@ window.pfodWebMouse = {
 
     // Create a working copy of the backup to apply touchAction changes
     const workingCopy = {
-      unindexed: JSON.parse(JSON.stringify(backup.unindexed)),
-      indexed: JSON.parse(JSON.stringify(backup.indexed)),
-      allTouchZonesByCmd: JSON.parse(JSON.stringify(backup.allTouchZonesByCmd)),
       allUnindexedItems: JSON.parse(JSON.stringify(backup.allUnindexedItems)),
-      allIndexedItemsByNumber: JSON.parse(JSON.stringify(backup.allIndexedItemsByNumber))
+      allIndexedItemsByNumber: JSON.parse(JSON.stringify(backup.allIndexedItemsByNumber)),
+      allTouchZonesByCmd: JSON.parse(JSON.stringify(backup.allTouchZonesByCmd))
     };
     console.log(`[TOUCH_ACTION_DEBUG] Created working copy - unindexed: ${workingCopy.allUnindexedItems.length}, indexed keys: [${Object.keys(workingCopy.allIndexedItemsByNumber).join(', ')}], touchZones: [${Object.keys(workingCopy.allTouchZonesByCmd).join(', ')}]`);
 
@@ -933,17 +920,27 @@ window.pfodWebMouse = {
     pseudoUpdateResponse.items.forEach(processedItem => {
       console.log(`[TOUCH_ACTION] Applying processed item to working copy:`, JSON.stringify(processedItem, null, 2));
       
-      // Update the working copy's indexed items directly with the processed item that has proper transform and clipRegion
+      // Handle hide/unhide items specially - they modify target item visibility instead of replacing the item
       if (processedItem.idx !== undefined) {
-        workingCopy.indexed[processedItem.idx] = processedItem;
-        workingCopy.allIndexedItemsByNumber[processedItem.idx] = processedItem;
-        console.log(`[TOUCH_ACTION] Updated working copy indexed item ${processedItem.idx} with processed touchAction item`);
-        console.log(`[TOUCH_ACTION_DEBUG] Working copy item ${processedItem.idx} after update:`, JSON.stringify(workingCopy.allIndexedItemsByNumber[processedItem.idx], null, 2));
+        if (processedItem.type === 'hide' || processedItem.type === 'unhide') {
+          const targetItem = workingCopy.allIndexedItemsByNumber[processedItem.idx];
+          if (targetItem) {
+            const newVisible = (processedItem.type === 'unhide');
+            console.log(`[TOUCH_ACTION] ${processedItem.type === 'unhide' ? 'Unhiding' : 'Hiding'} item ${processedItem.idx}: setting visible from ${targetItem.visible} to ${newVisible}`);
+            targetItem.visible = newVisible;
+          } else {
+            console.warn(`[TOUCH_ACTION] ${processedItem.type} operation: No item found with idx=${processedItem.idx} to ${processedItem.type === 'unhide' ? 'unhide' : 'hide'}`);
+          }
+        } else {
+          // Normal item replacement for non-hide/unhide items
+          workingCopy.allIndexedItemsByNumber[processedItem.idx] = processedItem;
+          console.log(`[TOUCH_ACTION] Updated working copy indexed item ${processedItem.idx} with processed touchAction item`);
+          console.log(`[TOUCH_ACTION_DEBUG] Working copy item ${processedItem.idx} after update:`, JSON.stringify(workingCopy.allIndexedItemsByNumber[processedItem.idx], null, 2));
+        }
       }
     });
 
-    // Apply working copy to drawingManagerState for redraw
-    this.drawingManager.indexedItems[drawingName] = workingCopy.indexed;
+    // Apply working copy to merged drawingManagerState for redraw (no per-drawing assignments)
     this.mergeAndRedraw.drawingManagerState.allTouchZonesByCmd = workingCopy.allTouchZonesByCmd;
     this.mergeAndRedraw.drawingManagerState.allUnindexedItems = workingCopy.allUnindexedItems;
     this.mergeAndRedraw.drawingManagerState.allIndexedItemsByNumber = workingCopy.allIndexedItemsByNumber;
@@ -1229,29 +1226,14 @@ window.pfodWebMouse = {
       return;
     }
 
-    // Restore ALL backed up data directly - no merge operations needed
-    if (backup.unindexed) {
-    drawingViewer.drawingManager.unindexedItems[drawingName] = backup.unindexed;
-    } else {
-     console.warn(`[TOUCH_ACTION] no unindexed to restoring`);
-    }
-      
-    if (backup.indexed) {
-    drawingViewer.drawingManager.indexedItems[drawingName] = backup.indexed;
-    } else {
-     console.warn(`[TOUCH_ACTION] no indexed to restoring`);
-    }
-
-    // Restore touchZones to both per-drawing and merged collections
-    if (backup.touchZonesByCmd) {
-      drawingViewer.drawingManager.touchZonesByCmd[drawingName] = backup.touchZonesByCmd;
-    }
+    // Restore ONLY merged/display data - per-drawing data should only be changed by server updates
+    
+    // Restore merged touchZones
     if (backup.allTouchZonesByCmd) {
-      // Restore merged touchZones directly to avoid waiting for merge operation
       drawingViewer.mergeAndRedraw.drawingManagerState.allTouchZonesByCmd = backup.allTouchZonesByCmd;
     }
     
-    // Restore merged items directly to drawingManagerState
+    // Restore merged items
     if (backup.allUnindexedItems) {
       drawingViewer.mergeAndRedraw.drawingManagerState.allUnindexedItems = backup.allUnindexedItems;
     }
@@ -1259,30 +1241,24 @@ window.pfodWebMouse = {
       drawingViewer.mergeAndRedraw.drawingManagerState.allIndexedItemsByNumber = backup.allIndexedItemsByNumber;
     }
     
-    // Restore touchActions and touchActionInputs (using correct property names)
+    // Restore merged touchActions and touchActionInputs
     if (backup.touchActions) {
-      if (!drawingViewer.drawingManager.touchActionsByCmd) {
-        drawingViewer.drawingManager.touchActionsByCmd = {};
-      }
-      drawingViewer.drawingManager.touchActionsByCmd[drawingName] = backup.touchActions;
+      drawingViewer.mergeAndRedraw.drawingManagerState.allTouchActionsByCmd = backup.touchActions;
     }
     if (backup.touchActionInputs) {
-      if (!drawingViewer.drawingManager.touchActionInputsByCmd) {
-        drawingViewer.drawingManager.touchActionInputsByCmd = {};
-      }
-      drawingViewer.drawingManager.touchActionInputsByCmd[drawingName] = backup.touchActionInputs;
+      drawingViewer.mergeAndRedraw.drawingManagerState.allTouchActionInputsByCmd = backup.touchActionInputs;
     }
 
-    // Restore transform state
+    // Restore global display transform (affects entire merged canvas positioning/scaling)
     if (backup.transform) {
-      drawingViewer.drawingManager.saveTransform(drawingName, backup.transform);
+      drawingViewer.mergeAndRedraw.setGlobalTransform(backup.transform);
     }
 
     // Note: We don't restore clip area because clip boundaries should be preserved 
     // as part of the drawing's permanent state during normal processing.
     // Only the transform state changes for the next update.
 
-    console.log(`[TOUCH_ACTION] Restored complete state: ${backup.unindexed.length} unindexed items, ${Object.keys(backup.indexed).length} indexed items, ${Object.keys(backup.touchZonesByCmd || {}).length} touchZones, ${Object.keys(backup.allTouchZonesByCmd || {}).length} merged touchZones, ${(backup.allUnindexedItems || []).length} merged unindexed items, ${Object.keys(backup.allIndexedItemsByNumber || {}).length} merged indexed items, ${Object.keys(backup.touchActions || {}).length} touchActions, ${Object.keys(backup.touchActionInputs || {}).length} touchActionInputs, transform (${backup.transform?.x}, ${backup.transform?.y}, ${backup.transform?.scale})`);
+    console.log(`[TOUCH_ACTION] Restored merged display state: ${Object.keys(backup.allTouchZonesByCmd || {}).length} merged touchZones, ${(backup.allUnindexedItems || []).length} merged unindexed items, ${Object.keys(backup.allIndexedItemsByNumber || {}).length} merged indexed items, ${Object.keys(backup.touchActions || {}).length} touchActions, ${Object.keys(backup.touchActionInputs || {}).length} touchActionInputs, transform (${backup.transform?.x}, ${backup.transform?.y}, ${backup.transform?.scale})`);
 
   },
 

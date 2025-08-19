@@ -50,7 +50,7 @@
             border-width: 3px;
         }
         canvas {
-            background-color: black;
+            background-color: #0000ff;
             display: block;
             padding: 0px;
         }
@@ -88,18 +88,29 @@
         <div id="white-border">
             <div id="black-border">
               <div id="border-inner">
-                <canvas id="drawing-canvas" width="1" height="1"></canvas>
+                <canvas id="drawing-canvas" width="300" height="100"></canvas>
             </div>
             </div>
         </div>
     </div>
+
+    <script>
+        const canvas = document.getElementById('drawing-canvas');
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = 'white';
+        ctx.font = '16px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('Loading files ...', canvas.width / 2, canvas.height / 2);
+    </script>
 
     <div id="message-overlay">
         <h1 id="message-title"></h1>
         <p id="message-text"></p>
     </div>
 
-    <!-- Load main application script which will load its dependencies -->
-    <script src="/pfodWebDebug.js"></script>
+    <!-- Load version first, then main application script which will load its dependencies -->
+    <script src="./version.js"></script>
+    <script src="./pfodWebDebug.js"></script>
 </body>
 </html>

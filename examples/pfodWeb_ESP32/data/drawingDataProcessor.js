@@ -588,8 +588,30 @@ class DrawingDataProcessor {
                     console.error('Error: Index item has idx < 1, ignoring item:', JSON.stringify(item));
                     skipProcessing = true; // Flag to skip adding this item to collections
                 } else {
-                    // For valid index items, save transform data
-                    console.log(`Processing index item with idx=${item.idx} - saving transform/clipping data for later use`);
+                    const idx = item.idx;
+                    const indexedItems = this.pfodWeb.drawingManager.getIndexedItems(drawingName);
+                    if (indexedItems[idx]) {
+                      console.log(`Processing index item with idx=${item.idx} - already have item with that idx so skip processing this`);
+                      skipProcessing = true; // Flag to skip adding this item to collections
+                    } else {
+                      // For valid index items, save transform data
+                      console.log(`Processing index item with idx=${item.idx} - saving transform/clipping data for later use`);
+                    }
+                }
+                // Handle index items with cmdName (touchZone items)  
+                if (item.cmdName && item.cmdName.trim() !== '') {
+                    const cmd = item.cmd || '';
+                    if (cmd.trim().length > 0) {
+                        // Check if there's already a touchZone with this cmd
+                        const existingTouchZone = this.pfodWeb.drawingManager.touchZonesByCmd[drawingName] && 
+                                                this.pfodWeb.drawingManager.touchZonesByCmd[drawingName][cmd];
+                        if (existingTouchZone) {
+                            console.log(`Processing index item with cmdName="${item.cmdName}" cmd="${cmd}" - already exists, skipping`);
+                            skipProcessing = true;
+                        } else {
+                            console.log(`Processing index item with cmdName="${item.cmdName}" cmd="${cmd}" - will be added as touchZone placeholder`);
+                        }
+                    }
                 }
             } // end not hide / unhide / erase
             
@@ -611,9 +633,14 @@ class DrawingDataProcessor {
                             console.warn(`Erase operation: No item found with idx=${idx} to erase`);
                         }
                     } else if (item.cmd) {
+                        if (item.drawingName !== undefined) {
+                         this.pfodWeb.drawingManager.eraseByCmd(drawingName, item.cmd, item.drawingName);
+                         console.log(`Erased insertDwg and actions with cmd="${item.cmd}"`);
+                       } else {
                         // Erase by cmd - removes touchZone and all associated actions
                         this.pfodWeb.drawingManager.eraseByCmd(drawingName, item.cmd);
                         console.log(`Erased touchZone and actions with cmd="${item.cmd}"`);
+                       }
                     }
                     // Skip adding erase items to any collection
                     skipProcessing = true;
@@ -635,11 +662,21 @@ class DrawingDataProcessor {
                     } else if (item.cmd) {
                         // Hide/unhide by cmd - affects touchZones and insertDwg items only
                         if (item.type === 'hide') {
+                            if (item.drawingName !== undefined) {
+                            this.pfodWeb.drawingManager.hideByCmd(drawingName, item.cmd,item.drawingName);
+                            console.log(`Hidden touchZone and insertDwg items with cmd="${item.cmd}"`);
+                            } else {
                             this.pfodWeb.drawingManager.hideByCmd(drawingName, item.cmd);
                             console.log(`Hidden touchZone and insertDwg items with cmd="${item.cmd}"`);
+                            }
                         } else if (item.type === 'unhide') {
+                            if (item.drawingName !== undefined) {
+                            this.pfodWeb.drawingManager.unhideByCmd(drawingName, item.cmd,item.drawingName);
+                            console.log(`Unhidden touchZone and insertDwg items with cmd="${item.cmd}"`);
+                            } else {
                             this.pfodWeb.drawingManager.unhideByCmd(drawingName, item.cmd);
                             console.log(`Unhidden touchZone and insertDwg items with cmd="${item.cmd}"`);
+                            }
                         }
                     }
                     // Skip adding hide/unhide items to any collection
@@ -678,16 +715,19 @@ class DrawingDataProcessor {
                         console.error(`Error adding insertDwg item to unindexed items for ${currentDrawing}:`, error);
                         console.log('Item that caused error:', JSON.stringify(item));
                     }
-              // Check if this is a touchZone 
-              } else if (item.type === 'touchZone') {
-                    // Check if there's an associated touchActionInput for this cmd
-                    if (item.cmd && item.cmd.trim().length > 0) {
-                        const existingTouchActionInput = this.pfodWeb.drawingManager.getTouchActionInput(itemDrawingName, item.cmd);
-                        if (existingTouchActionInput) {
-                            // If touchActionInput exists, filter can only be TOUCH or TOUCH_DISABLED
-                            if (item.filter !== TouchZoneFilters.TOUCH && item.filter !== TouchZoneFilters.TOUCH_DISABLED) {
-                                console.log(`[TOUCH_ZONE] Constraining updated touchZone filter from ${item.filter} to TOUCH for cmd=${item.cmd} due to existing touchActionInput`);
-                                item.filter = TouchZoneFilters.TOUCH;
+              // Check if this is a touchZone or index item with cmdName
+              } else if (item.type === 'touchZone' || (item.type === 'index' && item.cmdName && item.cmdName.trim() !== '')) {
+                    // Only process filter for actual touchZone items, not index items
+                    if (item.type === 'touchZone') {
+                        // Check if there's an associated touchActionInput for this cmd
+                        if (item.cmd && item.cmd.trim().length > 0) {
+                            const existingTouchActionInput = this.pfodWeb.drawingManager.getTouchActionInput(itemDrawingName, item.cmd);
+                            if (existingTouchActionInput) {
+                                // If touchActionInput exists, filter can only be TOUCH or TOUCH_DISABLED
+                                if (item.filter !== TouchZoneFilters.TOUCH && item.filter !== TouchZoneFilters.TOUCH_DISABLED) {
+                                    console.log(`[TOUCH_ZONE] Constraining updated touchZone filter from ${item.filter} to TOUCH for cmd=${item.cmd} due to existing touchActionInput`);
+                                    item.filter = TouchZoneFilters.TOUCH;
+                                }
                             }
                         }
                     }
@@ -727,6 +767,8 @@ class DrawingDataProcessor {
                   if (isUpdate) {
                    item.transform = currentIndexedItems[idx].transform;// || { x: 0, y: 0, scale: 1 };
                    item.clipRegion = currentIndexedItems[idx].clipRegion;// || { x: 0, y: 0, width: 100, height: 20 };
+                   // Preserve visibility state from existing item
+                   item.visible = currentIndexedItems[idx].visible;
                   }
 
                   this.pfodWeb.drawingManager.indexedItems[itemDrawingName][idx] = item;

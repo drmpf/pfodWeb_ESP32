@@ -12,8 +12,8 @@
 // MergeAndRedraw and DrawingManager are available on window object
 
 
-// JavaScript version constant - shared across modules
-const JS_VERSION = "V1.0.1"; // keep in sync with server.js value
+// JavaScript version constant loaded globally from version.js
+// JS_VERSION is available as a global variable
 
 // DrawingViewer class to encapsulate all viewer functionality
 class DrawingViewer {
@@ -21,6 +21,10 @@ class DrawingViewer {
     console.log('[PFODWEB_DEBUG] DrawingViewer constructor called - NEW INSTANCE CREATED');
     console.log('[PFODWEB_DEBUG] URL:', window.location.href);
     console.log('[PFODWEB_DEBUG] Referrer:', document.referrer);
+
+    // Extract target IP from URL or global variable
+    this.targetIP = this.extractTargetIP();
+    console.log('[PFODWEB_DEBUG] Target IP:', this.targetIP);
 
     // DOM Elements
     this.canvas = document.getElementById('drawing-canvas');
@@ -104,6 +108,58 @@ class DrawingViewer {
     this.setupEventListeners();
   }
 
+  // Extract target IP address from URL parameters or global variable
+  extractTargetIP() {
+    // First check if global variable was set by index.html
+    if (window.PFOD_TARGET_IP) {
+      return window.PFOD_TARGET_IP;
+    }
+
+    // Extract from URL parameters (e.g., ?targetIP=192.168.1.100)
+    const urlParams = new URLSearchParams(window.location.search);
+    const targetIP = urlParams.get('targetIP');
+    
+    if (targetIP) {
+      // Validate IP address format
+      const ipRegex = /^(\d{1,3}\.){3}\d{1,3}$/;
+      if (ipRegex.test(targetIP)) {
+        const parts = targetIP.split('.');
+        // Validate IP address ranges
+        const isValidIP = parts.every(part => {
+          const num = parseInt(part, 10);
+          return num >= 0 && num <= 255;
+        });
+        if (isValidIP) {
+          return targetIP;
+        }
+      }
+    }
+    
+    return null;
+  }
+
+  // Build endpoint URL with target IP
+  buildEndpoint(path) {
+    if (this.targetIP) {
+      return `http://${this.targetIP}${path}`;
+    }
+    return path; // Fallback to relative URL
+  }
+
+  // Build fetch options with appropriate CORS settings
+  buildFetchOptions(additionalHeaders = {}) {
+    return {
+      headers: {
+        'Accept': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest',
+        ...additionalHeaders
+      },
+      mode: this.targetIP ? 'cors' : 'same-origin',
+      credentials: this.targetIP ? 'omit' : 'same-origin',
+      cache: 'no-cache'
+    };
+  }
+
   // Get context-specific storage key based on referrer and current URL
   getDimensionStorageKey() {
     const isIframe = window.self !== window.top;
@@ -175,19 +231,9 @@ class DrawingViewer {
     console.log('Sending {.} request without version to get drawing name from server via session context');
     console.log(`Queueing initial request: ${endpoint}`);
 
-    const options = {
-      headers: {
-        'Accept': 'application/json',
-        'X-Requested-With': 'XMLHttpRequest'
-      },
-      mode: 'same-origin',
-      credentials: 'same-origin',
-      cache: 'no-cache'
-    };
-
     // Add to request queue with mainMenu type - not a drawing request
     const requestType = 'mainMenu';
-    this.addToRequestQueue(null, endpoint, options, null, requestType);
+    this.addToRequestQueue(null, endpoint, null, null, requestType);
   }
 
   // Update page title to include main drawing name
@@ -233,21 +279,10 @@ class DrawingViewer {
         endpoint += `?cmd=${encodeURIComponent('{' + currentDrawingName + '}')}`;
       }
 
-      let options = {
-        headers: {
-          'Accept': 'application/json',
-          'X-Requested-With': 'XMLHttpRequest'
-        },
-        mode: 'same-origin',
-        credentials: 'same-origin',
-        cache: 'no-cache'
-      };
-
       console.log(`Requesting drawing data: ${endpoint}`);
-      console.log('Request options:', JSON.stringify(options));
 
       // Add main drawing request to the queue
-      this.addToRequestQueue(currentDrawingName, endpoint, options, null, 'main');
+      this.addToRequestQueue(currentDrawingName, endpoint, null, null, 'main');
     } catch (error) {
       console.error('Failed to load drawing:', error);
       this.isUpdating = true; // Re-enable updates even if loading failed
@@ -375,10 +410,14 @@ class DrawingViewer {
       });
     }
 
+    // Always use buildFetchOptions for consistent CORS handling
+    const finalOptions = this.buildFetchOptions();
+    console.log(`[QUEUE] Using buildFetchOptions for consistent CORS handling`);
+    
     this.requestQueue.push({
       drawingName: drawingName,
       endpoint: endpoint,
-      options: options || {},
+      options: finalOptions,
       retryCount: 0,
       touchZoneInfo: touchZoneInfo,
       requestType: requestType
@@ -590,7 +629,15 @@ class DrawingViewer {
         });
         console.log(`[QUEUE] Tracking sent request: cmd="${request.touchZoneInfo.cmd}", filter="${request.touchZoneInfo.filter}"`);
       }
-      const response = await fetch(request.endpoint, request.options);
+      // Ensure endpoint has full URL with target IP if it's a relative path
+      let endpoint = request.endpoint;
+      console.log(`[QUEUE] Original endpoint: ${endpoint}, targetIP: ${this.targetIP}`);
+      if (endpoint.startsWith('/') && this.targetIP) {
+        endpoint = `http://${this.targetIP}${endpoint}`;
+        console.log(`[QUEUE] Transformed endpoint to HTTP: ${endpoint}`);
+      }
+      
+      const response = await fetch(endpoint, request.options);
 
       console.warn(`[QUEUE] Received response for "${request.drawingName}": status ${response.status}, queue length: ${this.requestQueue.length}`);
 
@@ -607,9 +654,51 @@ class DrawingViewer {
       //this.requestQueue.shift(); // remove request regardless of what it was this response handles it
       
       let lastRequest = request.requestType;
+      /***
+      // Prefilter JSON to fix newlines in strings before parsing
+      // prehaps add this back later to catch all control chars
+      function prefilterJSON(jsonString) {
+        let result = '';
+        let inString = false;
+        let escaping = false;
+        
+        for (let i = 0; i < jsonString.length; i++) {
+          const char = jsonString[i];
+          
+          if (escaping) {
+            result += char;
+            escaping = false;
+            continue;
+          }
+          
+          if (char === '\\') {
+            result += char;
+            escaping = true;
+            continue;
+          }
+          
+          if (char === '"') {
+            inString = !inString;
+            result += char;
+            continue;
+          }
+          
+          if (inString && char === '\n') {
+            result += '\\n';  // Replace literal newline with escaped newline
+          } else {
+            result += char;
+          }
+        }
+        
+        return result;
+      }
+      
       // Parse the JSON for processing
-      const data = JSON.parse(responseText);
+      const cleanedResponseText = prefilterJSON(responseText);
+      const data = JSON.parse(cleanedResponseText);
       console.log('[QUEUE] parsedText ', JSON.stringify(data,null,2));
+      **/
+      const data = JSON.parse(responseText);
       // Handle different response types for 
       let cmd;
       if (data.cmd) {
@@ -906,18 +995,8 @@ class DrawingViewer {
       **/
       // Keep URL as /pfodWeb (or original URL) - don't change to direct drawing URLs
 
-      // Ensure we're making an API request 
-      const options = {
-        headers: {
-          'Accept': 'application/json',
-          'X-Requested-With': 'XMLHttpRequest'
-        },
-        mode: 'same-origin',
-        credentials: 'same-origin',
-        cache: 'no-cache'
-      };
       // Add to the request queue
-      this.addToRequestQueue(drawingName, endpoint, options, null, 'update');
+      this.addToRequestQueue(drawingName, endpoint, null, null, 'update');
       console.log(`[QUEUE_DWG] Added "${drawingName}" to request queue`);
     } catch (error) {
       console.error(`[QUEUE_DWG] Failed to queue drawing "${drawingName}":`, error);
@@ -1030,17 +1109,8 @@ class DrawingViewer {
         if (!this.requestQueue.some(req => req.drawingName === drawingName)) {
           const endpoint = `/pfodWeb?cmd=${encodeURIComponent('{' + drawingName + '}')}`;
 
-          const options = {
-            headers: {
-              'Accept': 'application/json',
-              'X-Requested-With': 'XMLHttpRequest'
-            },
-            mode: 'same-origin',
-            credentials: 'same-origin',
-            cache: 'no-cache'
-          };
           console.warn(`[INSERT_DWG] Adding "${drawingName}" to request queue (already in drawings)`);
-          this.addToRequestQueue(drawingName, endpoint, options, null, 'insertDwg');
+          this.addToRequestQueue(drawingName, endpoint, null, null, 'insertDwg');
         } else {
           console.log(`[INSERT_DWG] "${drawingName}" already in request queue`);
         }
@@ -1075,18 +1145,8 @@ class DrawingViewer {
     // Add to the request queue
     if (!this.requestQueue.some(req => req.drawingName === drawingName)) {
       const endpoint = `/pfodWeb?cmd=${encodeURIComponent('{' + drawingName + '}')}`;
-      const options = {
-        headers: {
-          'Accept': 'application/json',
-          'X-Requested-With': 'XMLHttpRequest'
-        },
-        mode: 'same-origin',
-        credentials: 'same-origin',
-        cache: 'no-cache'
-      };
-
       console.warn(`[INSERT_DWG] Adding "${drawingName}" to request queue (new insert)`);
-      this.addToRequestQueue(drawingName, endpoint, options, null, 'insertDwg');
+      this.addToRequestQueue(drawingName, endpoint, null, null, 'insertDwg');
     } else {
       console.log(`[INSERT_DWG] "${drawingName}" already in request queue`);
     }
@@ -1418,13 +1478,14 @@ function loadScript(src) {
 // Load all dependencies in order
 async function loadDependencies() {
   const dependencies = [
-    '/DrawingManager.js',
-    '/displayTextUtils.js',
-    '/redraw.js',
-    '/mergeAndRedraw.js',
-    '/webTranslator.js',
-    '/drawingDataProcessor.js',
-    '/pfodWebMouse.js'
+    './version.js',
+    './DrawingManager.js',
+    './displayTextUtils.js',
+    './redraw.js',
+    './mergeAndRedraw.js',
+    './webTranslator.js',
+    './drawingDataProcessor.js',
+    './pfodWebMouse.js'
   ];
 
   for (const dep of dependencies) {

@@ -45,14 +45,15 @@ function loadScript_noDebug(src) {
 // Load all dependencies in order
 async function loadDependencies_noDebug() {
   const dependencies = [
-    '/pfodWebDebug.js',
-    '/DrawingManager.js',
-    '/displayTextUtils.js',
-    '/redraw.js',
-    '/mergeAndRedraw.js',
-    '/webTranslator.js',
-    '/drawingDataProcessor.js',
-    '/pfodWebMouse.js'
+    './version.js',
+    './pfodWebDebug.js',
+    './DrawingManager.js',
+    './displayTextUtils.js',
+    './redraw.js',
+    './mergeAndRedraw.js',
+    './webTranslator.js',
+    './drawingDataProcessor.js',
+    './pfodWebMouse.js'
 
   ];
 

@@ -837,6 +837,118 @@ function translateRawUnhide(rawUnhideString) {
     return unhideObject;
 }
 
+function translateRawErase(rawEraseString) {
+    // Check if this is an erase item
+    if (!rawEraseString.startsWith('|e')) {
+        throw new Error('Invalid erase format: must start with |e');
+    }
+    
+    // Remove the |e prefix
+    const content = rawEraseString.substring(2);
+    
+    // Create erase object
+    const eraseObject = {
+        type: "erase"
+    };
+    
+    // Check if idx is specified (starts with `) or cmd is specified (starts with ~)
+    if (content.startsWith('`')) {
+        // Extract idx
+        const idx = parseInt(content.substring(1));
+        eraseObject.idx = idx;
+    } else if (content.startsWith('~')) {
+        // Extract cmd
+        const cmd = content.substring(1);
+        eraseObject.cmd = cmd;
+    } else {
+        throw new Error('Invalid erase format: must specify either `idx or ~cmd');
+    }
+    
+    return eraseObject;
+}
+
+function translateRawHideDwg(rawHideString) {
+    // Check if this is a hide item
+    if (!rawHideString.startsWith('|hd')) {
+        throw new Error('Invalid hide dwg format: must start with |hd');
+    }
+    
+    // Remove the |h prefix
+    const content = rawHideString.substring(3);
+    
+    // Create hide object
+    const hideObject = {
+        type: "hide"
+    };
+    
+    // Check if  cmd is specified (starts with ~)
+    if (content.startsWith('~')) {
+        // Extract cmd
+        const cmd = content.substring(1);
+        hideObject.cmd = cmd;
+        hideObject.drawingName = cmd;
+    } else {
+        throw new Error('Invalid hide dwg format: must specify ~loadCmd');
+    }
+    
+    return hideObject;
+}
+
+function translateRawUnhideDwg(rawUnhideString) {
+    // Check if this is an unhide item
+    if (!rawUnhideString.startsWith('|uhd')) {
+        throw new Error('Invalid unhide dwg format: must start with |uhd');
+    }
+    
+    // Remove the |uh prefix
+    const content = rawUnhideString.substring(4);
+    
+    // Create unhide object
+    const unhideObject = {
+        type: "unhide"
+    };
+    
+    // Check if cmd is specified (starts with ~)
+    if (content.startsWith('~')) {
+        // Extract cmd
+        const cmd = content.substring(1);
+        unhideObject.cmd = cmd;
+        unhideObject.drawingName = cmd;
+    } else {
+        throw new Error('Invalid unhide dwg format: must specify ~loadCmd');
+    }
+    
+    return unhideObject;
+}
+
+function translateRawEraseDwg(rawEraseString) {
+    // Check if this is an erase item
+    if (!rawEraseString.startsWith('|ed')) {
+        throw new Error('Invalid erase dwg format: must start with |ed');
+    }
+    
+    // Remove the |e prefix
+    const content = rawEraseString.substring(3);
+    
+    // Create erase object
+    const eraseObject = {
+        type: "erase"
+    };
+    
+    // Check if cmd is specified (starts with ~)
+    if (content.startsWith('~')) {
+        // Extract cmd
+        const cmd = content.substring(1);
+        eraseObject.cmd = cmd;
+        eraseObject.drawingName = cmd;
+    } else {
+        throw new Error('Invalid erase format: must specify ~loadCmd');
+    }
+    
+    return eraseObject;
+}
+
+
 function translateRawZero(rawZeroString) {
     // Check if this is a zero item
     if (!rawZeroString.startsWith('|z')) {
@@ -885,35 +997,6 @@ function translateRawZero(rawZeroString) {
     }
 }
 
-function translateRawErase(rawEraseString) {
-    // Check if this is an erase item
-    if (!rawEraseString.startsWith('|e')) {
-        throw new Error('Invalid erase format: must start with |e');
-    }
-    
-    // Remove the |e prefix
-    const content = rawEraseString.substring(2);
-    
-    // Create erase object
-    const eraseObject = {
-        type: "erase"
-    };
-    
-    // Check if idx is specified (starts with `) or cmd is specified (starts with ~)
-    if (content.startsWith('`')) {
-        // Extract idx
-        const idx = parseInt(content.substring(1));
-        eraseObject.idx = idx;
-    } else if (content.startsWith('~')) {
-        // Extract cmd
-        const cmd = content.substring(1);
-        eraseObject.cmd = cmd;
-    } else {
-        throw new Error('Invalid erase format: must specify either `idx or ~cmd');
-    }
-    
-    return eraseObject;
-}
 
 function translateRawIndex(rawIndexString) {
     // Check if this is an index item
@@ -1046,13 +1129,15 @@ function translateRawInsertDwg(rawInsertDwgString) {
     // Parse parts: loadcmd ~ ~ colOffset ~ rowOffset
     const drawingName = parts[0]; // loadcmd (drawing name)
     // parts[1] is empty (intentional gap in format)
-    const xOffset = parseFloat(parts[2]); // colOffset
-    const yOffset = parseFloat(parts[3]); // rowOffset
+    const xOffset = parts[2] === '' ? 0 : parseFloat(parts[2]); // colOffset
+    const yOffset = parts[3] === '' ? 0 : parseFloat(parts[3]); // rowOffset
     
     // Create insertDwg object
     const insertDwgObject = {
         type: "insertDwg",
         drawingName: drawingName,
+        cmd: drawingName,
+        cmdName: drawingName,
         xOffset: xOffset,
         yOffset: yOffset
     };
@@ -1237,16 +1322,26 @@ function translateRawItem(rawItemString, isTouchAction = false) {
         return translateRawText(rawItemString,isTouchAction);
     } else if (rawItemString.startsWith('|v')) {
         return translateRawValue(rawItemString,isTouchAction);
+// check these first        
+    } else if (rawItemString.startsWith('|uhd')) {
+        return translateRawUnhideDwg(rawItemString,isTouchAction);
+    } else if (rawItemString.startsWith('|hd')) {
+        return translateRawHideDwg(rawItemString,isTouchAction);
+    } else if (rawItemString.startsWith('|ed')) {
+        return translateRawEraseDwg(rawItemString);
+// then check these        
     } else if (rawItemString.startsWith('|uh')) {
         return translateRawUnhide(rawItemString,isTouchAction);
     } else if (rawItemString.startsWith('|h')) {
         return translateRawHide(rawItemString,isTouchAction);
+    } else if (rawItemString.startsWith('|e')) {
+        return translateRawErase(rawItemString);
+
+        
     } else if (rawItemString.startsWith('|z')) {
         return translateRawZero(rawItemString);
     } else if (rawItemString.startsWith('|xc') || rawItemString.startsWith('|x')) {
         return translateRawTouchZone(rawItemString);
-    } else if (rawItemString.startsWith('|e')) {
-        return translateRawErase(rawItemString);
     } else if (rawItemString.startsWith('|i')) {
         return translateRawIndex(rawItemString);
     } else if (rawItemString.startsWith('|d')) {
